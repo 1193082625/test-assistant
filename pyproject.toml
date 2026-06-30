@@ -1,0 +1,29 @@
+[project]
+name = "test-assistant"
+version = "0.1.0"
+description = "LLM 驱动的智能测试工具"
+authors = [
+    {name = "xibao",email = "1193082625@qq.com"}
+]
+requires-python = ">=3.13,<4.0"
+dependencies = [
+    "click (>=8.4.2,<9.0.0)",
+    "langchain-core (>=1.4.8,<2.0.0)",
+    "pyyaml (>=6.0.3,<7.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+packages = [
+    { include = "cli" },
+    { include = "core" },
+    { include = "web" },
+    { include = "reports" },
+]
+
+[tool.poetry.scripts]
+test-assistant = "cli.main:cli"
