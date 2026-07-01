@@ -2,6 +2,8 @@ import os
 import click
 import yaml
 
+from core.analyzers.framework import analyze_project, FrameworkInfo
+
 # 测试用例持久化到项目 `.autotest/` 目录，可直接被项目引用
 AUTOTEST_DIR = ".autotest"
 # 默认配置
@@ -64,10 +66,18 @@ def create_autotest_structure(target_path: str) -> dict:
     }
 
 
-def write_config(autotest_path: str, project_name: str, mode: str) -> str:
+def write_config(autotest_path: str, project_name: str, project_config: FrameworkInfo, mode: str) -> str:
     """生成并写入 config.yml，返回配置文件路径"""
     config = DEFAULT_CONFIG.copy()
     config["project"]["name"] = project_name
+    config["project"]["type"] = project_config.project_type
+    config["project"]["language"] = project_config.language
+    config["project"]["frameworks"] = project_config.frameworks
+    config["project"]["test_framework"] = project_config.test_framework
+    config["project"]["build_tools"] = project_config.build_tools
+    config["project"]["has_dockerfile"] = project_config.has_dockerfile
+    config["project"]["has_ci_config"] = project_config.has_ci_config
+
 
     # 识别目标项目是否为新项目
     if mode == "bootstrap":
@@ -143,9 +153,13 @@ def init(path, name, mode):
     for p in result["created_paths"]:
         click.echo(f"  ✓ 创建：{os.path.relpath(p, target_path)}")
 
+    # 识别项目
+    project_config, project_info = analyze_project(target_path)
+    click.echo(project_info)
+
     # 写入配置
     click.echo(f"\n⚙️  生成配置文件...")
-    config_path = write_config(result["autotest_path"], project_name, mode)
+    config_path = write_config(result["autotest_path"], project_name, project_config, mode)
     click.echo(f"  ✓ 写入：{os.path.relpath(config_path, target_path)}")
 
     click.echo(f"\n✅ 项目已绑定：{project_name}")
