@@ -40,13 +40,17 @@ def get_file_snapshot(f_path: str) -> Snapshot:
     )
 
 
-def take_snapshot(root_dir: str, excludes: list[str]) -> list[Snapshot]:
+def take_snapshot(root_dir: str, excludes: list[str]) -> tuple[list[Snapshot], int]:
     snapshots = []
+    skipped = 0
     for root, dirs, files in os.walk(root_dir):
         dirs[:] = [f for f in dirs if f not in excludes]
         for f in files:
-            full_path = os.path.join(root, f)
-            snapshots.append(get_file_snapshot(full_path))
+            try:
+                full_path = os.path.join(root, f)
+                snapshots.append(get_file_snapshot(full_path))
+            except Exception:
+                skipped += 1
     
-    return snapshots
+    return snapshots, skipped
 

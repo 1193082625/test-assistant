@@ -43,6 +43,12 @@ DEFAULT_CONFIG = {
 
 def create_autotest_structure(target_path: str) -> dict:
     """创建 .autotest/ 目录结构，返回创建路径的列表"""
+
+    # 在创建目录前先检查权限
+    if not os.access(target_path, os.W_OK):
+        click.echo(f"✗ 没有写权限：{target_path}")
+        raise SystemExit(1)
+
     autotest_path = os.path.join(target_path, AUTOTEST_DIR)
     created_paths = []
 
@@ -95,6 +101,13 @@ def write_config(autotest_path: str, project_name: str, project_config: Framewor
 
     return config_path
 
+def cleanup_autotest(target_path: str):
+    """当初始化失败时清空autotest目录"""
+    import shutil
+    autotest_path = os.path.join(target_path, ".autotest")
+    if os.path.exists(autotest_path):
+        shutil.rmtree(autotest_path)
+
 """
 bootstrap -- 新项目，做的事：
 - 安装测试框架依赖
@@ -123,65 +136,76 @@ auto （默认） -- 已有项目
 )
 def init(path, name, mode):
     """初始化绑定项目——在目标项目中创建 .autotest/ 工作区"""
+
     # 解析目标路径
     # os.path.abspath(path) 把相对路径转换成绝对路径
     target_path = os.path.abspath(path)
 
-    # 如果目标路径不是一个目录
-    if not os.path.isdir(target_path):
-        click.echo(f"✗ 路径不存在：{target_path}")
+    try:
+        # 如果目标路径不是一个目录
+        if not os.path.isdir(target_path):
+            click.echo(f"✗ 路径不存在：{target_path}")
+            raise SystemExit(1)
+
+        # 确认是否已有 .autotest/
+        autotest_existing = os.path.join(target_path, AUTOTEST_DIR)
+        if os.path.exists(autotest_existing):
+            click.echo(f"→ 检测到已存在的 .autotest/ 目录")
+            click.echo(f"  路径：{autotest_existing}")
+            if not click.confirm("  是否覆盖？"):
+                click.echo("✗ 已取消")
+                raise SystemExit(0)
+
+        # 确定项目名称
+        project_name = name if name else os.path.basename(target_path)
+        click.echo(f"\n🔧 初始化 test-assistant 项目")
+        click.echo(f"  目标路径：{target_path}")
+        click.echo(f"  项目名称：{project_name}")
+        click.echo(f"  初始化模式：{mode}")
+
+        # 创建目录结构
+        click.echo(f"\n📁 创建 .autotest/ 目录结构...")
+        result = create_autotest_structure(target_path)
+        for p in result["created_paths"]:
+            click.echo(f"  ✓ 创建：{os.path.relpath(p, target_path)}")
+
+        # 识别项目
+        try:
+            project_config, project_info = analyze_project(target_path)
+            click.echo(project_info)
+        except Exception as e:
+            click.echo(f"⚠ 框架检测失败: {e}, 已降级为 unknown")
+            project_config = FrameworkInfo(project_type="unknown")
+            project_info = "框架检测： unknown（检测失败）"
+
+        # 写入配置
+        click.echo(f"\n⚙️  生成配置文件...")
+        config_path = write_config(result["autotest_path"], project_name, project_config, mode)
+        click.echo(f"  ✓ 写入：{os.path.relpath(config_path, target_path)}")
+
+        # 获取文件快照
+        snapshots, skipped = take_snapshot(target_path, EXCLUDE_DIRS)
+        # 获取要写入的快照文件地址
+        snapshot_path = os.path.join(result["autotest_path"], "snapshot.json")
+        # 写入文件
+        with open(snapshot_path, 'w', encoding="utf-8") as f:
+            """
+            把 Python 对象 -> JSON 字符串 -> 写入文件
+            这里的 s.__dict__ 是 @dataclass 自动生成的，能把对象转为字典
+            __dict__ 是 Python 每个对象都有的属性，存的是实例的所有字段（Snapshot对象） -> 字典
+            f 文件对象，序列化结果直接写入文件
+            indent=2 JSON 输出缩进2个空格，美化可读性
+            default=str 遇到 JSON 不认识的对象时，调用 str() 转成字符串
+            """
+            json.dump([s.__dict__ for s in snapshots], f, indent=2, default=str)
+        
+        click.echo(f"\n✅ 写入： {os.path.relpath(snapshot_path, target_path)}")
+        click.echo(f"\n📷 文件快照：{len(snapshots)} 个文件（跳过 {skipped} 个）")
+        
+
+        click.echo(f"\n✅ 项目已绑定：{project_name}")
+        click.echo(f"  .autotest/ → {result['autotest_path']}")
+    except Exception as e:
+        click.echo(f"✗ 初始化失败：{e}")
+        cleanup_autotest(target_path)
         raise SystemExit(1)
-
-    # 确认是否已有 .autotest/
-    autotest_existing = os.path.join(target_path, AUTOTEST_DIR)
-    if os.path.exists(autotest_existing):
-        click.echo(f"→ 检测到已存在的 .autotest/ 目录")
-        click.echo(f"  路径：{autotest_existing}")
-        if not click.confirm("  是否覆盖？"):
-            click.echo("✗ 已取消")
-            raise SystemExit(0)
-
-    # 确定项目名称
-    project_name = name if name else os.path.basename(target_path)
-    click.echo(f"\n🔧 初始化 test-assistant 项目")
-    click.echo(f"  目标路径：{target_path}")
-    click.echo(f"  项目名称：{project_name}")
-    click.echo(f"  初始化模式：{mode}")
-
-    # 创建目录结构
-    click.echo(f"\n📁 创建 .autotest/ 目录结构...")
-    result = create_autotest_structure(target_path)
-    for p in result["created_paths"]:
-        click.echo(f"  ✓ 创建：{os.path.relpath(p, target_path)}")
-
-    # 识别项目
-    project_config, project_info = analyze_project(target_path)
-    click.echo(project_info)
-
-    # 写入配置
-    click.echo(f"\n⚙️  生成配置文件...")
-    config_path = write_config(result["autotest_path"], project_name, project_config, mode)
-    click.echo(f"  ✓ 写入：{os.path.relpath(config_path, target_path)}")
-
-    # 获取文件快照
-    snapshots = take_snapshot(target_path, EXCLUDE_DIRS)
-    # 获取要写入的快照文件地址
-    snapshot_path = os.path.join(result["autotest_path"], "snapshot.json")
-    # 写入文件
-    with open(snapshot_path, 'w', encoding="utf-8") as f:
-        """
-        把 Python 对象 -> JSON 字符串 -> 写入文件
-        这里的 s.__dict__ 是 @dataclass 自动生成的，能把对象转为字典
-        __dict__ 是 Python 每个对象都有的属性，存的是实例的所有字段（Snapshot对象） -> 字典
-        f 文件对象，序列化结果直接写入文件
-        indent=2 JSON 输出缩进2个空格，美化可读性
-        default=str 遇到 JSON 不认识的对象时，调用 str() 转成字符串
-        """
-        json.dump([s.__dict__ for s in snapshots], f, indent=2, default=str)
-    
-    click.echo(f"\n✅ 写入： {os.path.relpath(snapshot_path, target_path)}")
-    click.echo(f"\n📷 文件快照：{len(snapshots)} 个文件")
-    
-
-    click.echo(f"\n✅ 项目已绑定：{project_name}")
-    click.echo(f"  .autotest/ → {result['autotest_path']}")
