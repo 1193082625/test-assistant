@@ -1,5 +1,6 @@
 import json
 import os
+
 import click
 from core.llm.client import LLMClient
 
@@ -12,13 +13,23 @@ class TestConfigSuggestion(BaseModel):
     config_files: list[str] = Field(description="需要创建的配置文件列表")
     confidence: float = Field(description="置信度 0-1")
 
-def generate_test_plan(snapshots_files: list[str]) -> TestConfigSuggestion | None:
+def generate_test_plan(snapshots_files: list[str], target_path: str="") -> TestConfigSuggestion | None:
     try:
         client = LLMClient(pydantic_model=TestConfigSuggestion)
         result = client.invoke_template(
             "分析项目文件，推荐测试框架。\n {format_instructions}\n项目文件列表：{files}",
             files=snapshots_files
         )
+
+        if not target_path:
+            cwd = os.getcwd()
+            test_plan_path = os.path.join(cwd, ".autotest", "test_plan.json")
+        else:
+            test_plan_path = os.path.join(target_path, ".autotest", "test_plan.json")
+
+        with open(test_plan_path, "w", encoding="utf-8") as f:
+            json.dump(result.model_dump(), f, ensure_ascii=False, indent=2)
+        
         return result
     except Exception as e:
         click.echo(f"解析测试方案失败 {e}")

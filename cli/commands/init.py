@@ -210,7 +210,7 @@ def init(path, name, mode):
         click.echo(f"  .autotest/ → {result['autotest_path']}")
 
         snapshots_files = [s.path for s in snapshots]
-        result = generate_test_plan(snapshots_files)
+        result = generate_test_plan(snapshots_files, target_path)
         print(result)
     except Exception as e:
         click.echo(f"✗ 初始化失败：{e}")

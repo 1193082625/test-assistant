@@ -1,0 +1,12 @@
+{
+  "test_framework": "Vitest",
+  "reason": "项目基于 uni-app 框架，使用 Vue 3 和 Vite 构建。Vitest 与 Vite 原生集成，配置简单，运行速度快，且完美支持 Vue 组件测试。项目已包含 package.json 和 Vite 相关配置，无需额外构建工具。同时，Vitest 社区活跃，文档完善，适合现代前端项目。",
+  "setup_commands": [
+    "npm install -D vitest @vue/test-utils happy-dom",
+    "npx vitest --run"
+  ],
+  "config_files": [
+    "vitest.config.js"
+  ],
+  "confidence": 0.95
+}
