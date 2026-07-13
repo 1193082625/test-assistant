@@ -6,6 +6,8 @@ import json
 from core.analyzers.framework import EXCLUDE_DIRS, analyze_project, FrameworkInfo
 from core.analyzers.snapshot import take_snapshot
 
+from cli.commands.plan import generate_test_plan
+
 # 测试用例持久化到项目 `.autotest/` 目录，可直接被项目引用
 AUTOTEST_DIR = ".autotest"
 # 默认配置
@@ -198,13 +200,18 @@ def init(path, name, mode):
             default=str 遇到 JSON 不认识的对象时，调用 str() 转成字符串
             """
             json.dump([s.__dict__ for s in snapshots], f, indent=2, default=str)
-        
+
+
         click.echo(f"\n✅ 写入： {os.path.relpath(snapshot_path, target_path)}")
         click.echo(f"\n📷 文件快照：{len(snapshots)} 个文件（跳过 {skipped} 个）")
         
 
         click.echo(f"\n✅ 项目已绑定：{project_name}")
         click.echo(f"  .autotest/ → {result['autotest_path']}")
+
+        snapshots_files = [s.path for s in snapshots]
+        result = generate_test_plan(snapshots_files)
+        print(result)
     except Exception as e:
         click.echo(f"✗ 初始化失败：{e}")
         cleanup_autotest(target_path)
