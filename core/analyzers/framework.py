@@ -1,7 +1,10 @@
+from configparser import ConfigParser
+import tomllib
 from dataclasses import dataclass
 import os
 from typing import NamedTuple
 
+import xml.etree.ElementTree as ET
 import yaml
 import json
 
@@ -27,6 +30,7 @@ class FrameworkInfo:
 # 声明一个元组类型
 class ProjectInfo(NamedTuple):
     project_type: str
+    target_analysis: str
     file_content: str
 
 class AnalyzeInfo(NamedTuple):
@@ -58,7 +62,11 @@ TEST_FRAMEWORK_DICT = {
 }
 BUILD_TOOL_DICT = {
     "vite": "vite",
-    "typescript": "typescript",
+    "webpack": "Webpack",
+    "rollup": "Rollup",
+    "esbuild": "ESBuild",
+    "typescript": "TypeScript",
+    "tsc": "TypeScript",
 }
 
 def read_file(path: str):
@@ -73,47 +81,114 @@ def detect_project_type(files: list[str], root: str) -> ProjectInfo | None:
         if f == "package.json":
             result = ProjectInfo(
                 project_type="frontend",
+                target_analysis="json",
                 file_content=read_file(path)
             )
             break # 找到了就跳出
-        elif f == "pyproject.toml" or f == "pytest.ini" or f == "setup.cfg":
+        elif f == "pyproject.toml":
             result = ProjectInfo(
                 project_type="Python",
+                target_analysis="tomllib",
+                file_content=read_file(path)
+            )
+            break 
+
+        elif f == "pytest.ini" or f == "setup.cfg":
+            result = ProjectInfo(
+                project_type="Python",
+                target_analysis="configparser",
                 file_content=read_file(path)
             )
             break # 找到了就跳出
-        elif f == "pom.xml" or f == "build.gradle":
+        elif f == "pom.xml":
             result = ProjectInfo(
                 project_type="Java",
+                target_analysis="xml.etree.ElementTree",
+                file_content=read_file(path)
+            )
+            break # 找到了就跳出
+        elif f == "build.gradle":
+            result = ProjectInfo(
+                project_type="Java",
+                target_analysis="build.gradle",
                 file_content=read_file(path)
             )
             break # 找到了就跳出
         elif f == "go.mod":
             result = ProjectInfo(
                 project_type="Go",
+                target_analysis="Go",
                 file_content=read_file(path)
             )
             break # 找到了就跳出
         elif f == "manifest.json" or f == "pages.json":
             result = ProjectInfo(
                 project_type="Mini-program",
+                target_analysis="json",
                 file_content=read_file(path)
             )
             break # 找到了就跳出
 
     return result
 
+def analysis_go(content: str) -> dict:
+    """简单的 go.mod 解析器 -- 提取依赖列表"""
+    deps = {}
+    in_block = False
+    for line in content.splitlines():
+        line = line.strip() # 去掉开头和结尾的空白字符（空格、制表符、换行符等）
+        if line == "require (":
+            in_block = True
+        elif line == ")":
+            in_block = False
+        elif in_block and line:
+            # "github.com/gin-gonic/gin v1.9.1" --> 获取路径的最后一段
+            parts = line.split() # 先按空白拆成 ["github.com/gin-gonic/gin", "v1.9.1"]
+            if len(parts) >= 2:
+                name = parts[0].split("/")[-1] # 再按 / 拆， 取最后一段 "gin"
+                deps[name] = parts[0]
+    
+    return deps
+
 def detect_result_list(project_info: ProjectInfo, origin_dict: dict) -> list[str]:
     """"""
     result = []
-    project_type = project_info.project_type
     package_json_content = project_info.file_content
-    if project_type == "frontend":
+    target_analysis = project_info.target_analysis
+    all_deps = {}
+    if target_analysis == "json": # 解析 JSON 文件
         data = json.loads(package_json_content) # 解析 YAML -- Python 字典
         all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+    elif target_analysis == "tomllib": # 解析 pyproject.toml 文件
+        data = tomllib.loads(package_json_content) # 解析 YAML -- Python 字典
+    elif target_analysis == "configparser": # 解析 pytext.ini \ setup.cfg
+        # 先创建对象，再调用方法，最后检查对象
+        config = ConfigParser()
+        config.read_string(package_json_content) # 读取到 config 内部
+        data = config if config.sections() else {}
+        # 等价于下面的代码
+        # data = {} # 给空字典兜底
+        # if config.sections: # 有 section 说明解析成功
+        #     data = config # 直接用 config 对象
+    elif target_analysis == "xml.etree.ElementTree": # 解析 pom.xml
+        # 返回 Element
+        root = ET.fromstring(package_json_content)
+        # 查找所有 dependency 下的 artifactId
+        deps = {}
+        for dep in root.iter("dependency"):
+            art = dep.find("artifactId")
+            if art is not None and art.text:
+                # 命名空间处理 （pom.xml 通常有 xmlns）
+                name = art.text
+                deps[name] = name
+        data = deps
+
+    elif target_analysis == "build.gradle": # 暂时不深入解析
+        data = {}
+    elif target_analysis == "Go": # 解析 go.mod
+        data = analysis_go(package_json_content)
     else:
         data = yaml.safe_load(package_json_content) # 解析 YAML -- Python 字典
-        all_deps = {}
     
     for label, val in origin_dict.items():
         if label in data or label in all_deps:

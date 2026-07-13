@@ -1,8 +1,10 @@
 import os
 import click
 import yaml
+import json
 
-from core.analyzers.framework import analyze_project, FrameworkInfo
+from core.analyzers.framework import EXCLUDE_DIRS, analyze_project, FrameworkInfo
+from core.analyzers.snapshot import take_snapshot
 
 # 测试用例持久化到项目 `.autotest/` 目录，可直接被项目引用
 AUTOTEST_DIR = ".autotest"
@@ -38,7 +40,6 @@ DEFAULT_CONFIG = {
         "patterns": ["**/*.py", "**/*.js", "**/*.ts", "**/*.tsx", "**/*.jsx"],
     },
 }
-
 
 def create_autotest_structure(target_path: str) -> dict:
     """创建 .autotest/ 目录结构，返回创建路径的列表"""
@@ -161,6 +162,26 @@ def init(path, name, mode):
     click.echo(f"\n⚙️  生成配置文件...")
     config_path = write_config(result["autotest_path"], project_name, project_config, mode)
     click.echo(f"  ✓ 写入：{os.path.relpath(config_path, target_path)}")
+
+    # 获取文件快照
+    snapshots = take_snapshot(target_path, EXCLUDE_DIRS)
+    # 获取要写入的快照文件地址
+    snapshot_path = os.path.join(result["autotest_path"], "snapshot.json")
+    # 写入文件
+    with open(snapshot_path, 'w', encoding="utf-8") as f:
+        """
+        把 Python 对象 -> JSON 字符串 -> 写入文件
+        这里的 s.__dict__ 是 @dataclass 自动生成的，能把对象转为字典
+        __dict__ 是 Python 每个对象都有的属性，存的是实例的所有字段（Snapshot对象） -> 字典
+        f 文件对象，序列化结果直接写入文件
+        indent=2 JSON 输出缩进2个空格，美化可读性
+        default=str 遇到 JSON 不认识的对象时，调用 str() 转成字符串
+        """
+        json.dump([s.__dict__ for s in snapshots], f, indent=2, default=str)
+    
+    click.echo(f"\n✅ 写入： {os.path.relpath(snapshot_path, target_path)}")
+    click.echo(f"\n📷 文件快照：{len(snapshots)} 个文件")
+    
 
     click.echo(f"\n✅ 项目已绑定：{project_name}")
     click.echo(f"  .autotest/ → {result['autotest_path']}")

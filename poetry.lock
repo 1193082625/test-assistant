@@ -222,6 +222,18 @@ files = [
 ]
 
 [[package]]
+name = "et"
+version = "0.0.2"
+description = "Simple package to phone home by sending and receiving arbitrary dictionaries via UDP  "
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "et-0.0.2-py2.py3-none-any.whl", hash = "sha256:e818df914b5a1238c423d0e0dce04eaa939ed5ec19d906952ee6d7136593f7c1"},
+    {file = "et-0.0.2.tar.gz", hash = "sha256:d9ccb5767e0b89cf1f670e88e088039cc9c0c7cf0e7949b286ee21456a511e5a"},
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 description = "A pure-Python, bring-your-own-I/O implementation of HTTP/1.1"
@@ -1329,4 +1341,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13,<4.0"
-content-hash = "45c76ba14aeda01966195760448209a8028a82a7912a91cbe7656e6cff32141f"
+content-hash = "2d009ab65744ccf422ce01dbc2c07e8ae964f217b76593100fffe56aa98a21e1"
