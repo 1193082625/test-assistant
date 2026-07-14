@@ -2,6 +2,7 @@ from configparser import ConfigParser
 import tomllib
 from dataclasses import dataclass
 import os
+import re
 from typing import NamedTuple
 
 import xml.etree.ElementTree as ET
@@ -138,7 +139,7 @@ def analysis_go(content: str) -> dict:
     in_block = False
     for line in content.splitlines():
         line = line.strip() # 去掉开头和结尾的空白字符（空格、制表符、换行符等）
-        if line == "require (":
+        if line == "require (" or line == "require(":
             in_block = True
         elif line == ")":
             in_block = False
@@ -179,8 +180,10 @@ def detect_result_list(project_info: ProjectInfo, origin_dict: dict) -> list[str
         # if config.sections: # 有 section 说明解析成功
         #     data = config # 直接用 config 对象
     elif target_analysis == "xml.etree.ElementTree": # 解析 pom.xml
+        # 去掉 xmlns 命名空间，否则 find/findall 找不到元素
+        content_no_ns = re.sub(r'\sxmlns="[^"]+"', '', package_json_content, count=1)
         # 返回 Element
-        root = ET.fromstring(package_json_content)
+        root = ET.fromstring(content_no_ns)
         # 查找所有 dependency 下的 artifactId
         deps = {}
         for dep in root.iter("dependency"):
