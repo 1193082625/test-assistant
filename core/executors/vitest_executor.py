@@ -45,11 +45,12 @@ class VitestExecutor(BaseExecutor):
          """
         results = []
         json_data = json.loads(json_str)
+        _status_map = {"passed": "passed", "failed": "failed", "pending": "skipped"}
         for file_result in json_data["testResults"]:
             for item in file_result["assertionResults"]:
                 results.append(TestResult(
                     name=item["title"],
-                    status="skipped" if item["status"] == "pending" else item["status"],
+                    status=_status_map.get(item["status"], "error"),
                     duration=item["duration"],
                 ))
         return results
