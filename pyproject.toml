@@ -30,3 +30,7 @@ packages = [
 
 [tool.poetry.scripts]
 test-assistant = "cli.main:cli"
+[dependency-groups]
+dev = [
+    "pytest (>=9.1.1,<10.0.0)"
+]

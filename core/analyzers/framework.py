@@ -43,6 +43,7 @@ FRAMEWORK_DICT = {
     "react": "React",
     "vue": "Vue",
     "@angular/core": "Angular",
+    "@dcloudio/uni-app": "uni-app",
     "express": "Express",
     "fastify": "Fastify",
     "next": "Next",
@@ -157,10 +158,17 @@ def detect_result_list(project_info: ProjectInfo, origin_dict: dict) -> list[str
     target_analysis = project_info.target_analysis
     all_deps = {}
     if target_analysis == "json": # 解析 JSON 文件
-        data = json.loads(package_json_content) # 解析 YAML -- Python 字典
+        data = json.loads(package_json_content) # 解析 json
         all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
     elif target_analysis == "tomllib": # 解析 pyproject.toml 文件
         data = tomllib.loads(package_json_content) # 解析 YAML -- Python 字典
+        # 【project】 下的 dependencies 是列表
+        deps_list = data.get("project", {}).get("dependencies", [])
+        if isinstance(deps_list, list):
+            for dep in deps_list:
+                # "fastapi>=0.100.0" -> "fastapi"
+                name = dep.split(">")[0].split("<")[0].split("=")[0].split("!")[0].strip()
+                all_deps[name] = name
     elif target_analysis == "configparser": # 解析 pytext.ini \ setup.cfg
         # 先创建对象，再调用方法，最后检查对象
         config = ConfigParser()
