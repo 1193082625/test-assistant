@@ -15,7 +15,7 @@ DEFAULT_CONFIG = {
     "project": {
         "name": "",
         "type": "auto",  # auto | frontend | backend | miniprogram
-        "test_framework": "auto",  # 自动检测测试框架
+        "test_framework": [],  # 自动检测测试框架
     },
     "test_types": {
         "unit": {"enabled": True, "priority": 1}, # 单元测试

@@ -87,7 +87,6 @@ def detect_change_node(state: GraphStates) -> dict:
         "messages": "增量检查修改内容"
     }
 
-
 def run_affected_node(state: GraphStates):
     """
     执行变化
@@ -97,10 +96,6 @@ def run_affected_node(state: GraphStates):
     """
     changed_files = state["changed_files"]
     test_framework = state["project_info"].config["project"]["test_framework"]
-
-    all_changed = []
-    for files in changed_files.values():
-        all_changed.extend(files)
 
     # 没有测试框架 -> 跳过执行
     if not test_framework:
@@ -112,17 +107,21 @@ def run_affected_node(state: GraphStates):
 
     project_path = state["project_info"].project_path
     all_results = []
-    if test_framework == "vitest":
+    if "vitest" in test_framework:
         executor = VitestExecutor(cwd=project_path)
-    elif test_framework == "pytest":
+    elif "pytest" in test_framework:
         executor = PytestExecutor(cwd=project_path)
 
     test_results_by_file = {}
-    for file in all_changed:
-        if executor.can_handle(file):
-            results = list(executor.execute(file)) # 执行单个文件
-            all_results.extend(results)
-            test_results_by_file[file] = results # 按文件记录
+    test_cases_dir = os.path.join(project_path, ".autotest", "test_cases")
+    if os.path.isdir(test_cases_dir):
+        for root, dirs, files in os.walk(test_cases_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                if executor.can_handle(file_path):
+                    results = list(executor.execute(file_path)) # 执行单个文件
+                    all_results.extend(results)
+                    test_results_by_file[file_path] = results # 按文件记录
 
     # 统计
     passed = sum(1 for r in all_results if r.status == "passed")

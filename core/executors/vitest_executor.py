@@ -24,6 +24,13 @@ class VitestExecutor(BaseExecutor):
             timeout=120,
             cwd=self.cwd,
         )
+
+        # vitest 执行失败 --> 打印错误，返回空
+        if result.returncode != 0:
+            print(f"⚠ vitest 执行失败: {file_path}")
+            print(result.stderr)
+            return []
+
         return self._parse_json_output(result.stdout)
 
     def _parse_json_output(self, json_str: str) -> list[TestResult]:

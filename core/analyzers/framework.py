@@ -56,24 +56,41 @@ FRAMEWORK_DICT = {
 }
 # 检测已安装了什么
 TEST_FRAMEWORK_DICT = {
-    "vitest": "Vitest",
-    "jest": "Jest",
-    "@playwright": "Playwright",
-    "cypress": "Cypress",
+    "vitest": "vitest",
+    "jest": "jest",
+    "@playwright": "playwright",
+    "cypress": "cypress",
 
     "pytest": "pytest"
 }
 # 根据项目推荐安装测试框架
 FRAMEWORK_TEST_MAP = {
     # 前端
-    "uni-app": "vitest",
-    "vue": "vitest",
-    "react": "vitest",
+    "uni-app": ["vitest", "@vue/test-utils", "happy-dom"],
+    "vue": ["vitest", "@vue/test-utils", "happy-dom"],
+    "react": ["vitest", "@testing-library/react", "happy-dom", "@testing-library/jest-dom"],
     # Python
-    "django": "pytest",
-    "fastapi": "pytest",
-    "flask": "pytest"
+    "django": ["pytest"],
+    "fastapi": ["pytest"],
+    "flask": ["pytest"]
 }
+# 框架 需要生成的配置文件模板
+FRAMEWORK_CONFIG_TEMPLATES = {
+    "uni-app": {
+        "vitest.config.ts": """
+        import { defineConfig } from 'vitest/config'
+        
+        export default defineConfig({
+          plugins: [],
+          test: {
+            environment: 'happy-dom',
+            globals: true,
+          },
+        })
+        """,
+    },
+}
+
 BUILD_TOOL_DICT = {
     "vite": "vite",
     "webpack": "Webpack",
@@ -264,12 +281,20 @@ def analyze_project(target_path: str) -> AnalyzeInfo:
         project_info=f"框架检测：{' + '.join(config.frameworks)}"
     )
 
-def suggest_test_framework(frameworks: list) -> str | None:
-    """根据项目信息推荐测试框架，返回框架名 或 None"""
+def suggest_test_framework(frameworks: list) -> list[str] | None:
+    """根据项目信息推荐测试框架（含额外依赖），返回包名列表 或 None"""
     for framework in frameworks:
         if framework in FRAMEWORK_TEST_MAP:
             return FRAMEWORK_TEST_MAP[framework]
     return None
+
+def suggest_config_templates(frameworks: list) -> dict[str, str]:
+    """根据项目信息推荐需要生成的配置文件模板，返回 {文件名: 内容}"""
+    templates: dict[str, str] = {}
+    for framework in frameworks:
+        if framework in FRAMEWORK_CONFIG_TEMPLATES:
+            templates.update(FRAMEWORK_CONFIG_TEMPLATES[framework])
+    return templates
 
 if __name__ == "__main__":
     project_cwd = '/Users/wangyue/Desktop/work/train-departure-diary/train-departure-diary-frontend'
