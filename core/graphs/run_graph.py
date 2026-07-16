@@ -9,6 +9,7 @@ from typing import TypedDict, Annotated
 
 import yaml
 from langgraph.graph import add_messages, StateGraph, END
+from langsmith import traceable
 from pydantic import BaseModel
 
 from core.executors.base import TestResult
@@ -30,6 +31,7 @@ class GraphStates(TypedDict):
     max_retries: int # 最大重试次数
 
 # LangGraph 节点只接收一个参数 -- state，多出来的参数没法传进去
+@traceable(name="detect_change")
 def detect_change_node(state: GraphStates) -> dict:
     """
     检测文件变化
@@ -87,6 +89,7 @@ def detect_change_node(state: GraphStates) -> dict:
         "messages": "增量检查修改内容"
     }
 
+@traceable(name="run_affected")
 def run_affected_node(state: GraphStates):
     """
     执行变化
@@ -96,6 +99,14 @@ def run_affected_node(state: GraphStates):
     """
     changed_files = state["changed_files"]
     test_framework = state["project_info"].config["project"]["test_framework"]
+
+    # 没有变更 --> 跳过执行
+    if not any(changed_files.values()):
+        return {
+            "messages": "✓ 文件无变更，跳过测试执行",
+            "test_results_by_file": {},
+            "errors": [],
+        }
 
     # 没有测试框架 -> 跳过执行
     if not test_framework:
@@ -135,6 +146,7 @@ def run_affected_node(state: GraphStates):
         "errors": failed_errors,
     }
 
+@traceable(name="learn")
 def learn_node(state: GraphStates):
     """
     入：取 errors[0] 分析失败原因，尝试修复

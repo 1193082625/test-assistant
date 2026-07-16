@@ -1,5 +1,4 @@
-# test-assistant: LLM 驱动的智能测试工具
-
+ri
 ## 概述
 
 `test-assistant` 是一个基于 LangChain 生态构建的智能测试 CLI 工具 + Web Dashboard。它能够绑定一个开发项目，自动分析项目结构，LLM 驱动生成多类型测试用例，经用户确认后执行，并在迭代过程中持续增量更新。
