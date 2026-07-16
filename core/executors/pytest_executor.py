@@ -6,6 +6,8 @@ from core.executors.base import BaseExecutor, TestResult
 
 class PytestExecutor(BaseExecutor):
     """调用 pytest 执行测试文件"""
+    def __init__(self, cwd: str | None = None) -> None:
+        self.cwd = cwd
     def can_handle(self, file_path: str) -> bool:
         return file_path.endswith(".py") and ("test_" in file_path or "_test" in file_path)
 
@@ -16,6 +18,7 @@ class PytestExecutor(BaseExecutor):
             capture_output=True,
             text=True,
             timeout=120,
+            cwd=self.cwd,
         )
         return self._parse_output(result.stdout, result.returncode)
 

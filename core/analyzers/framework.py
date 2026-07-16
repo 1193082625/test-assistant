@@ -54,6 +54,7 @@ FRAMEWORK_DICT = {
     "fastapi": "FastAPI",
     "flask": "Flask"
 }
+# 检测已安装了什么
 TEST_FRAMEWORK_DICT = {
     "vitest": "Vitest",
     "jest": "Jest",
@@ -61,6 +62,17 @@ TEST_FRAMEWORK_DICT = {
     "cypress": "Cypress",
 
     "pytest": "pytest"
+}
+# 根据项目推荐安装测试框架
+FRAMEWORK_TEST_MAP = {
+    # 前端
+    "uni-app": "vitest",
+    "vue": "vitest",
+    "react": "vitest",
+    # Python
+    "django": "pytest",
+    "fastapi": "pytest",
+    "flask": "pytest"
 }
 BUILD_TOOL_DICT = {
     "vite": "vite",
@@ -252,6 +264,12 @@ def analyze_project(target_path: str) -> AnalyzeInfo:
         project_info=f"框架检测：{' + '.join(config.frameworks)}"
     )
 
+def suggest_test_framework(frameworks: list) -> str | None:
+    """根据项目信息推荐测试框架，返回框架名 或 None"""
+    for framework in frameworks:
+        if framework in FRAMEWORK_TEST_MAP:
+            return FRAMEWORK_TEST_MAP[framework]
+    return None
 
 if __name__ == "__main__":
     project_cwd = '/Users/wangyue/Desktop/work/train-departure-diary/train-departure-diary-frontend'

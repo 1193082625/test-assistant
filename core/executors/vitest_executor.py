@@ -6,6 +6,8 @@ from core.executors.base import BaseExecutor, TestResult
 
 class VitestExecutor(BaseExecutor):
     """调用 vitest 执行测试文件"""
+    def __init__(self, cwd: str | None = None) -> None:
+        self.cwd = cwd
     def can_handle(self, file_path: str) -> bool:
         # endswith 可以传元组 匹配多个后缀
         return file_path.endswith((".test.ts", ".test.tsx", ".spec.js", ".test.js"))
@@ -20,6 +22,7 @@ class VitestExecutor(BaseExecutor):
             capture_output=True,
             text=True,
             timeout=120,
+            cwd=self.cwd,
         )
         return self._parse_json_output(result.stdout)
 
