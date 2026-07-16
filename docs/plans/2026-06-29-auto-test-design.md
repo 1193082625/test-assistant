@@ -105,6 +105,19 @@ my-project/
 | 性能基线  | 关键路径耗时对比            | ★★☆  | ★★★  |  ★☆☆   |
 | 边界测试  | 空值、极限、异常输入        | ★★☆  | ★★★  |  ★★☆   |
 
+> **⚠️ 注意——项目类型与执行器匹配约束**：
+>
+> ✅ **vitest 能覆盖的**：纯 JS/TS 业务逻辑的单元测试（工具函数、store action、数据转换等）
+>
+> ❌ **vitest 无法覆盖的（需要专用工具链）**：
+> | 场景 | 原因 | 需要工具 |
+> |------|------|----------|
+> | uni-app Vue 组件渲染测试 | `.vue` 模板编译后是小程序组件，非标准 Web 组件，vitest + `@vue/test-utils` 的 `mount()` 不认识 `<view>`、`<scroll-view>` 等标签 | `miniprogram-simulate` 或 uni-app 官方测试工具 |
+> | 页面跳转/路由测试 | 依赖小程序运行时环境 | `miniprogram-automator` + 微信开发者工具 |
+> | 原生 API 调用（uni.request / wx.request） | 只在小程序宿主环境可用 | 需要 Mock 层或真实小程序运行时 |
+>
+> **架构影响**：执行器选择不能仅靠 `can_handle(file_path)` 判断，需要引入 `(project_type, test_type)` 的二级匹配机制。详见"架构设计 → 执行器注册"一节。
+
 ## 两种初始化场景
 
 ### 初始项目 (`--mode bootstrap`)
@@ -138,6 +151,8 @@ test-assistant (Python CLI 包)
 │   │   ├── e2e.py
 │   │   └── ...
 │   ├── executors/           测试执行器
+│   │   ├── base.py              抽象基类 (BaseExecutor + TestResult)
+│   │   ├── registry.py          执行器注册表 (按 project_type + test_type 匹配)
 │   │   ├── pytest_executor.py
 │   │   ├── vitest_executor.py
 │   │   └── playwright_executor.py
