@@ -70,9 +70,10 @@ FRAMEWORK_TEST_MAP = {
     "vue": ["vitest", "@vue/test-utils", "happy-dom"],
     "react": ["vitest", "@testing-library/react", "happy-dom", "@testing-library/jest-dom"],
     # Python
-    "django": ["pytest"],
-    "fastapi": ["pytest"],
-    "flask": ["pytest"]
+    "python": ["pytest"],
+    "Django": ["pytest"],
+    "Fastapi": ["pytest"],
+    "Flask": ["pytest"]
 }
 # 框架 需要生成的配置文件模板
 FRAMEWORK_CONFIG_TEMPLATES = {
@@ -89,6 +90,13 @@ FRAMEWORK_CONFIG_TEMPLATES = {
         })
         """,
     },
+    "python": {
+        "pytest.ini": """
+        [pytest]
+        testpaths = .autotest/test_cases
+        python_files = test_*.py *_test.py
+        """
+    }
 }
 
 BUILD_TOOL_DICT = {
@@ -118,7 +126,7 @@ def detect_project_type(files: list[str], root: str) -> ProjectInfo | None:
             break # 找到了就跳出
         elif f == "pyproject.toml":
             result = ProjectInfo(
-                project_type="Python",
+                project_type="python",
                 target_analysis="tomllib",
                 file_content=read_file(path)
             )
@@ -126,7 +134,7 @@ def detect_project_type(files: list[str], root: str) -> ProjectInfo | None:
 
         elif f == "pytest.ini" or f == "setup.cfg":
             result = ProjectInfo(
-                project_type="Python",
+                project_type="python",
                 target_analysis="configparser",
                 file_content=read_file(path)
             )
@@ -281,19 +289,23 @@ def analyze_project(target_path: str) -> AnalyzeInfo:
         project_info=f"框架检测：{' + '.join(config.frameworks)}"
     )
 
-def suggest_test_framework(frameworks: list) -> list[str] | None:
+def suggest_test_framework(frameworks: list, project_type: str = "") -> list[str] | None:
     """根据项目信息推荐测试框架（含额外依赖），返回包名列表 或 None"""
     for framework in frameworks:
         if framework in FRAMEWORK_TEST_MAP:
             return FRAMEWORK_TEST_MAP[framework]
+    if project_type in FRAMEWORK_TEST_MAP:
+        return FRAMEWORK_TEST_MAP[project_type]
     return None
 
-def suggest_config_templates(frameworks: list) -> dict[str, str]:
+def suggest_config_templates(frameworks: list, project_type: str = "") -> dict[str, str]:
     """根据项目信息推荐需要生成的配置文件模板，返回 {文件名: 内容}"""
     templates: dict[str, str] = {}
     for framework in frameworks:
         if framework in FRAMEWORK_CONFIG_TEMPLATES:
             templates.update(FRAMEWORK_CONFIG_TEMPLATES[framework])
+    if project_type in FRAMEWORK_CONFIG_TEMPLATES:
+        templates.update(FRAMEWORK_CONFIG_TEMPLATES[project_type])
     return templates
 
 if __name__ == "__main__":

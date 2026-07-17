@@ -99,7 +99,7 @@ def run(path):
 
     project_type = config["project"]["type"]
     test_framework = config["project"]["test_framework"]
-    recommended = suggest_test_framework(config["project"]["frameworks"])
+    recommended = suggest_test_framework(config["project"]["frameworks"], project_type)
 
     # 校验 config 记录的依赖是否真实存在
     test_framework_name = recommended[0] if recommended else None
@@ -139,7 +139,7 @@ def run(path):
                         cwd=project_path,
                         check=True,
                     )
-                elif project_type == "backend":
+                elif project_type == "python":
                     subprocess.run(
                         ['pip', 'install'] + (recommended if isinstance(recommended, list) else [recommended]),
                         cwd=project_path,
@@ -147,7 +147,7 @@ def run(path):
                     )
 
                 # 安装依赖后添加打印日志
-                config_templates = suggest_config_templates(config["project"]["frameworks"])
+                config_templates = suggest_config_templates(config["project"]["frameworks"], project_type)
                 for filename, content in config_templates.items():
                     config_file_path = os.path.join(project_path, filename)
                     if not os.path.exists(config_file_path):
