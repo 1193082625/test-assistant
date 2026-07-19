@@ -15,6 +15,8 @@ from pydantic import BaseModel
 from core.executors.base import TestResult
 from core.executors.pytest_executor import PytestExecutor
 from core.executors.vitest_executor import VitestExecutor
+from core.generators.test_generator import generate_tests_for_project
+
 
 class ProjectInfo(BaseModel):
     project_path: str # 项目目标路径
@@ -29,6 +31,7 @@ class GraphStates(TypedDict):
     test_results_by_file: list[TestResult]
     retry_count: int # 计数器
     max_retries: int # 最大重试次数
+    generated_tests: list[str] # 通过 解析文件 生成的测试代码
 
 # LangGraph 节点只接收一个参数 -- state，多出来的参数没法传进去
 @traceable(name="detect_change")
@@ -146,6 +149,24 @@ def run_affected_node(state: GraphStates):
         "errors": failed_errors,
     }
 
+@traceable(name="generate_tests")
+def generate_tests_node(state: GraphStates) -> dict:
+    changed_files = state["changed_files"]
+    if not any(changed_files.values()):
+        return {"messages": "无变更，跳过测试生成"}
+
+    generated = generate_tests_for_project(
+        state["project_info"].project_path,
+        changed_files,
+    )
+
+    if generated:
+        msg = f"生成 {len(generated)} 个测试文件"
+    else:
+        msg = "无需生成测试（无可测函数）"
+
+    return {"generated_tests": generated, "messages": msg}
+
 @traceable(name="learn")
 def learn_node(state: GraphStates):
     """
@@ -171,6 +192,7 @@ def run_graph(target_path: str):
     graph_builder = StateGraph(GraphStates)
     # 添加节点
     graph_builder.add_node("detect_change_node", detect_change_node)
+    graph_builder.add_node("generate_tests_node", generate_tests_node)
     graph_builder.add_node("run_affected_node", run_affected_node)
     graph_builder.add_node("learn_node", learn_node)
 
@@ -178,7 +200,8 @@ def run_graph(target_path: str):
     graph_builder.set_entry_point("detect_change_node")
 
     # 添加边
-    graph_builder.add_edge("detect_change_node", "run_affected_node")
+    graph_builder.add_edge("detect_change_node", "generate_tests_node")
+    graph_builder.add_edge("generate_tests_node", "run_affected_node")
     graph_builder.add_conditional_edges("run_affected_node", router, {
         "retry": "learn_node",
         "pass": END
@@ -202,6 +225,7 @@ def run_graph(target_path: str):
         "test_results_by_file": [],
         "changed_files": [],
         "retry_count": 0,
-        "max_retries": 3
+        "max_retries": 3,
+        "generated_tests": []
     })
     return result

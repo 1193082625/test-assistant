@@ -294,8 +294,8 @@ def suggest_test_framework(frameworks: list, project_type: str = "") -> list[str
     for framework in frameworks:
         if framework in FRAMEWORK_TEST_MAP:
             return FRAMEWORK_TEST_MAP[framework]
-    if project_type in FRAMEWORK_TEST_MAP:
-        return FRAMEWORK_TEST_MAP[project_type]
+    if project_type.lower() in FRAMEWORK_TEST_MAP:
+        return FRAMEWORK_TEST_MAP[project_type.lower()]
     return None
 
 def suggest_config_templates(frameworks: list, project_type: str = "") -> dict[str, str]:
