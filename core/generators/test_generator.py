@@ -16,6 +16,7 @@ import re
 from core.llm.client import LLMClient
 from core.analyzers.source_analyzer import analyze_python_file, get_class_def_from_import
 
+# 让 LLM 理解逻辑、了解依赖、知道代码和数据结构
 UNIT_TEST_PROMPT = """You are a Python test generation expert. Generate pytest unit tests for the following Python function.
 
 source file: {file_path}
@@ -32,6 +33,7 @@ Requirements:
 2. Cover: happy path, edge cases, error cases
 5. Only output the test code in a single ```python code block```
 6. Do NOT include any text outside the code block
+7. If the source file use Click (@click.command or @click.group), use `from click.testing import CliRunner` to test CLI commands, don't call the function directly.
 """
 
 def _extract_python_code(llm_output: str) -> str:
@@ -67,6 +69,11 @@ def generate_tests_for_file(file_path: str, output_dir: str, project_path: str |
     if not target_funcs:
         return None
 
+    # 如果文件 import 了 click，跳过测试生成（CliRunner 容易产生副作用）
+    if any(kw in imp for func in target_funcs for imp in func.imports for kw in ("click", "langgraph")):
+        print(f"  → 跳过 Click CLI 文件: {os.path.basename(file_path)}")
+        return None
+
     # 取第一个函数的信息作为 prompt 上下文
     functions_context = ""
     import_str = ""
@@ -84,6 +91,7 @@ def generate_tests_for_file(file_path: str, output_dir: str, project_path: str |
             import_str += f"```python\n{import_source_code}```\n\n"
 
     try:
+        print(f"  → LLM 生成测试: {os.path.basename(file_path)}...", end="", flush=True)
         client = LLMClient(temperature=0.2)
         response = client.invoke_template(
             UNIT_TEST_PROMPT,
@@ -108,6 +116,7 @@ def generate_tests_for_file(file_path: str, output_dir: str, project_path: str |
         f.write(test_code)
         f.write("\n")
 
+    print(" ✓")
     return output_path
 
 def generate_tests_for_project(project_path: str, changed_files: dict) -> list[str]:

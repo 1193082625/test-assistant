@@ -133,6 +133,7 @@ def run_affected_node(state: GraphStates):
             for file in files:
                 file_path = os.path.join(root, file)
                 if executor.can_handle(file_path):
+                    print(f"  → 执行测试: {os.path.basename(file_path)}...", end="", flush=True)
                     results = list(executor.execute(file_path)) # 执行单个文件
                     all_results.extend(results)
                     test_results_by_file[file_path] = results # 按文件记录
@@ -177,7 +178,8 @@ def learn_node(state: GraphStates):
         完成后回到 detect_change_node
     """
 
-    return {"retry_count": state["retry_count"]+1}
+    # return {"retry_count": state["retry_count"]+1}
+    pass
 
 def router(state: GraphStates):
     """如果结果中有失败，则重新思考并修复"""

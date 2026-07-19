@@ -40,27 +40,46 @@ class AnalyzeInfo(NamedTuple):
 
 EXCLUDE_DIRS = ["node_modules", ".git", "__pycache__", ".venv", "venv", ".next", "dist", "build", ".autotest"]
 
+# 检测项目用了什么
 FRAMEWORK_DICT = {
     "react": "React",
     "vue": "Vue",
+    "svelte": "Svelte",
     "@angular/core": "Angular",
     "@dcloudio/uni-app": "uni-app",
+    "solid-js": "Solid",
+    "preact": "Preact",
+    "@remix-run/react": "Remix",
+    "lit": "Lit",
+    "@sveltejs/kit":"SvelteKit",
     "express": "Express",
     "fastify": "Fastify",
     "next": "Next",
     "nuxt": "Nuxt",
+    "nestjs/core": "NestJS",
+    "koa": "Koa",
+    "@hono/hono": "Hono",
 
     "django": "Django",
     "fastapi": "FastAPI",
-    "flask": "Flask"
+    "flask": "Flask",
+    "tornado": "Tornado",
+    "sanic": "Sanic",
+    "bottle": "Bottle",
+    "aiohttp": "AIOHTTP",
+
+
 }
-# 检测已安装了什么
+# 检测用什么测试框架
 TEST_FRAMEWORK_DICT = {
     "vitest": "vitest",
     "jest": "jest",
-    "@playwright": "playwright",
     "cypress": "cypress",
-
+    "mocha": "mocha",
+    "ava": "ava",
+    "@wdio/cli": "webdriverIO",
+    "playwright": "playwright",
+    "@playwright/test": "playwright",
     "pytest": "pytest"
 }
 # 根据项目推荐安装测试框架
@@ -69,6 +88,9 @@ FRAMEWORK_TEST_MAP = {
     "uni-app": ["vitest", "@vue/test-utils", "happy-dom"],
     "vue": ["vitest", "@vue/test-utils", "happy-dom"],
     "react": ["vitest", "@testing-library/react", "happy-dom", "@testing-library/jest-dom"],
+    "Svelte": ["vitest", "happy-dom"],
+    "Solid": ["vitest", "solid-testing-library"],
+    "NestJS": ["jest"],
     # Python
     "python": ["pytest"],
     "Django": ["pytest"],
@@ -106,6 +128,12 @@ BUILD_TOOL_DICT = {
     "esbuild": "ESBuild",
     "typescript": "TypeScript",
     "tsc": "TypeScript",
+    "swc": "SWC",
+    "turbo": "Turbopack",
+    "parcel": "Parcel",
+    "gulp": "Gulp",
+    "postcss": "PostCSS",
+    "babel": "Babel",
 }
 
 def read_file(path: str):
