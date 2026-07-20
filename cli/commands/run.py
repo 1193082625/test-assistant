@@ -25,7 +25,7 @@ from core.graphs.run_graph import run_graph
 from core.utils import find_project_root
 
 
-def _ensure_smoke_test(project_path: str, project_type: str, test_framework: list[str]):
+def _ensure_smoke_test(project_path: str, project_type: str, test_frameworks: list[str]):
     """测试目录为空时，生成一个验证测试"""
     test_dir = os.path.join(project_path, ".autotest", "test_cases", "unit")
     existing = [f for f in os.listdir(test_dir) if f.endswith((".test.ts", ".test.js", ".py"))]
@@ -33,8 +33,7 @@ def _ensure_smoke_test(project_path: str, project_type: str, test_framework: lis
         return # 已有测试文件，跳过
 
     # 判断框架类型（兼容 list 和 str）
-    frameworks = test_framework
-    if any(fw in ("vitest", "jest") for fw in frameworks):
+    if any(framework in ("vitest", "jest") for framework in test_frameworks):
         file_path = os.path.join(test_dir, "verify.test.ts")
         content = """
         import { describe, it, expect } from "vitest";
@@ -45,7 +44,7 @@ def _ensure_smoke_test(project_path: str, project_type: str, test_framework: lis
             })
         })
         """
-    elif "pytest" in frameworks:
+    elif "pytest" in test_frameworks:
         file_path = os.path.join(test_dir, "test_verify.py")
         content = """
         def test_smoke():
@@ -87,7 +86,7 @@ def run(path):
         raise SystemExit(1)
 
     """
-    校验 test_framework 不为空
+    校验 test_frameworks 不为空
     → 读取项目类型（frontend/backend/miniprogram）
     → 检测是否有测试框架
         → 有，跳过当前逻辑，直接执行run_graph
@@ -100,14 +99,15 @@ def run(path):
         config = yaml.safe_load(f)
 
     project_type = config["project"]["type"]
-    test_framework = config["project"]["test_framework"]
-    recommended = suggest_test_framework(config["project"]["frameworks"], project_type)
+    language = config["project"]["language"]
+    test_frameworks = config["project"]["test_frameworks"]
+    recommended = suggest_test_framework(config["project"]["frameworks"], language)
 
     # 校验 config 记录的依赖是否真实存在
     test_framework_name = recommended[0] if recommended else None
     if test_framework_name == "vitest":
         project_pkg = os.path.join(project_path, "package.json")
-        if test_framework and os.path.exists(project_pkg):
+        if test_frameworks and os.path.exists(project_pkg):
             with open(project_pkg) as f:
                 pkg = json.load(f)
 
@@ -126,22 +126,22 @@ def run(path):
                     click.echo("  ✓ 添加 npm test 脚本")
 
             all_deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
-            if not any(dep in all_deps for dep in test_framework):
-                test_framework = []
-                config["project"]["test_framework"] = []
+            if not any(dep in all_deps for dep in test_frameworks):
+                test_frameworks = []
+                config["project"]["test_frameworks"] = []
 
-    if not test_framework or len(test_framework) == 0:
+    if not test_frameworks or len(test_frameworks) == 0:
         if recommended:
             # 问用户
             if click.confirm(f"检测到项目未安装测试框架，推荐安装 {recommended}, 是否安装？"):
                 # 执行安装
-                if project_type in ("frontend", "miniprogram"):
+                if language in ("javascript", "typescript"):
                     subprocess.run(
                         ["npm", "install", '-D'] + (recommended if isinstance(recommended, list) else [recommended]),
                         cwd=project_path,
                         check=True,
                     )
-                elif project_type == "python":
+                elif language == "python":
                     subprocess.run(
                         ['pip', 'install'] + (recommended if isinstance(recommended, list) else [recommended]),
                         cwd=project_path,
@@ -149,7 +149,7 @@ def run(path):
                     )
 
                 # 安装依赖后添加打印日志
-                config_templates = suggest_config_templates(config["project"]["frameworks"], project_type)
+                config_templates = suggest_config_templates(config["project"]["frameworks"], language)
                 for filename, content in config_templates.items():
                     config_file_path = os.path.join(project_path, filename)
                     if not os.path.exists(config_file_path):
@@ -161,8 +161,8 @@ def run(path):
 
                 # 更新 config.yml
                 with open(config_path, "w", encoding="utf-8") as f:
-                    config["project"]["test_framework"] = recommended
-                    test_framework = config["project"]["test_framework"]
+                    config["project"]["test_frameworks"] = recommended
+                    test_frameworks = config["project"]["test_frameworks"]
                     yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
             else:
                 click.echo("跳过测试执行")
@@ -171,7 +171,7 @@ def run(path):
             click.echo("无法确定推荐的测试框架，跳过执行")
             raise SystemExit(0)
 
-    _ensure_smoke_test(project_path, project_type, test_framework)
+    _ensure_smoke_test(project_path, project_type, test_frameworks)
 
     result = run_graph(project_path)
 

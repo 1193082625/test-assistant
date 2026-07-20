@@ -101,7 +101,7 @@ def run_affected_node(state: GraphStates):
     结果写入 State
     """
     changed_files = state["changed_files"]
-    test_framework = state["project_info"].config["project"]["test_framework"]
+    test_frameworks = state["project_info"].config["project"]["test_frameworks"]
 
     # 没有变更 --> 跳过执行
     if not any(changed_files.values()):
@@ -112,7 +112,7 @@ def run_affected_node(state: GraphStates):
         }
 
     # 没有测试框架 -> 跳过执行
-    if not test_framework:
+    if not test_frameworks:
         return {
             "messages": "⚠ 未检测到测试框架，跳过执行",
             "test_results_by_file": {},
@@ -121,9 +121,9 @@ def run_affected_node(state: GraphStates):
 
     project_path = state["project_info"].project_path
     all_results = []
-    if "vitest" in test_framework:
+    if "vitest" in test_frameworks:
         executor = VitestExecutor(cwd=project_path)
-    elif "pytest" in test_framework:
+    elif "pytest" in test_frameworks:
         executor = PytestExecutor(cwd=project_path)
 
     test_results_by_file = {}

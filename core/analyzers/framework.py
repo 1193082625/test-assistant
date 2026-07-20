@@ -311,23 +311,23 @@ def analyze_project(target_path: str) -> AnalyzeInfo:
         project_info=f"框架检测：{' + '.join(config.frameworks)}"
     )
 
-def suggest_test_framework(frameworks: list, project_type: str = "") -> list[str] | None:
+def suggest_test_framework(frameworks: list, language: str = "") -> list[str] | None:
     """根据项目信息推荐测试框架（含额外依赖），返回包名列表 或 None"""
     for framework in frameworks:
         if framework in FRAMEWORK_TEST_MAP:
             return FRAMEWORK_TEST_MAP[framework]
-    if project_type.lower() in FRAMEWORK_TEST_MAP:
-        return FRAMEWORK_TEST_MAP[project_type.lower()]
+    if language.lower() in FRAMEWORK_TEST_MAP:
+        return FRAMEWORK_TEST_MAP[language.lower()]
     return None
 
-def suggest_config_templates(frameworks: list, project_type: str = "") -> dict[str, str]:
+def suggest_config_templates(frameworks: list, language: str = "") -> dict[str, str]:
     """根据项目信息推荐需要生成的配置文件模板，返回 {文件名: 内容}"""
     templates: dict[str, str] = {}
     for framework in frameworks:
         if framework in FRAMEWORK_CONFIG_TEMPLATES:
             templates.update(FRAMEWORK_CONFIG_TEMPLATES[framework])
-    if project_type in FRAMEWORK_CONFIG_TEMPLATES:
-        templates.update(FRAMEWORK_CONFIG_TEMPLATES[project_type])
+    if language in FRAMEWORK_CONFIG_TEMPLATES:
+        templates.update(FRAMEWORK_CONFIG_TEMPLATES[language])
     return templates
 
 if __name__ == "__main__":

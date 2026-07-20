@@ -189,7 +189,7 @@ def init(path, name, mode):
             click.echo(project_info)
         except Exception as e:
             click.echo(f"⚠ 框架检测失败: {e}, 已降级为 unknown")
-            project_config = FrameworkInfo(project_type="unknown")
+            project_config = FrameworkInfo()
             project_info = "框架检测： unknown（检测失败）"
 
         # 写入配置
