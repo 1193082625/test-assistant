@@ -79,18 +79,10 @@ def create_autotest_structure(target_path: str) -> dict:
     }
 
 
-def write_config(autotest_path: str, project_name: str, project_config: FrameworkInfo, mode: str) -> str:
+def write_config(autotest_path: str, project_config: FrameworkInfo, mode: str) -> str:
     """生成并写入 config.yml，返回配置文件路径"""
     config = deepcopy(DEFAULT_CONFIG) # 深拷贝
-    config["project"]["name"] = project_name
-    config["project"]["type"] = project_config.project_type.value
-    config["project"]["language"] = project_config.language.value
-    config["project"]["frameworks"] = project_config.frameworks
-    config["project"]["test_frameworks"] = [framework.value for framework in project_config.test_frameworks]
-    config["project"]["build_tools"] = project_config.build_tools
-    config["project"]["has_dockerfile"] = project_config.has_dockerfile
-    config["project"]["has_ci_config"] = project_config.has_ci_config
-
+    config["project"].update(project_config.to_config())
 
     # 识别目标项目是否为新项目
     if mode == "bootstrap":

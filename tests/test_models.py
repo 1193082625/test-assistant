@@ -47,3 +47,33 @@ def test_framework_info_lists_are_not_shared():
 
     assert first.frameworks == ["FastAPI"]
     assert second.frameworks == []
+
+def test_framework_info_config_round_trip():
+    """往返测试 ： 领域对象 --> 配置字典 --> 领域对象；不丢失数据"""
+    original = FrameworkInfo(
+        project_type=ProjectType.BACKEND,
+        language=Language.PYTHON,
+        frameworks=["FastAPI"],
+        test_frameworks=[Framework.PYTEST],
+        build_tools=["poetry"],
+        has_dockerfile=True,
+        has_ci_config=True,
+    )
+    config = original.to_config()
+    restored = FrameworkInfo.from_config(config)
+
+    assert restored == original
+
+def test_framework_info_from_empty_config_uses_unknown_defaults():
+    """缺省值测试：缺失字段使用安全默认值"""
+    info = FrameworkInfo.from_config({})
+
+    assert info == FrameworkInfo()
+
+def test_framework_info_from_config_rejects_display_names():
+    """严格输入测试：非法展示名称不能进入领域模型"""
+    with pytest.raises(ValueError):
+        FrameworkInfo.from_config({
+            "type": "Backend",
+            "language": "python",
+        })
