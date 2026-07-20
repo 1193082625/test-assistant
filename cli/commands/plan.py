@@ -1,3 +1,4 @@
+"""查看、批准或拒绝 TestSpec"""
 import json
 import os
 

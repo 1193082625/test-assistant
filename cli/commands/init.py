@@ -1,3 +1,4 @@
+"""初始化和环境预检"""
 import os
 import click
 import yaml

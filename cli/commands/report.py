@@ -1,3 +1,4 @@
+"""导出报告"""
 import click
 
 @click.command()
