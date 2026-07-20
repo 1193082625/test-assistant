@@ -1,6 +1,5 @@
 from configparser import ConfigParser
 import tomllib
-from dataclasses import dataclass
 import os
 import re
 from typing import NamedTuple
@@ -9,28 +8,16 @@ import xml.etree.ElementTree as ET
 import yaml
 import json
 
-"""
-自动扫描目标项目，并识别：
-- 这是什么类型的项目？（前端、后端、小程序）
-- 用了什么框架？（React/vue/Express/FastAPI...）
-- 用了什么测试框架？（jest/vitest/pytest...）
-- 用了什么构建工具？（Vite/webpack/poetry...）
-"""
+from core.models import FrameworkInfo, Language, ProjectType, TestFramework
 
-# @dataclass 会自动生成 __init__，省去手写构造函数的麻烦
-@dataclass
-class FrameworkInfo:
-    project_type: str          # "frontend" | "backend" | "miniprogram" | "unknown"
-    language: str              # "javascript" | "typescript" | "python" | "java" | "go"
-    frameworks: list[str]      # ["react", "next.js"]
-    test_framework: list[str]  # ["vitest", "playwright"]
-    build_tools: list[str]     # ["vite"]
-    has_dockerfile: bool
-    has_ci_config: bool
-
-# 声明一个元组类型
+"""
+强制每次检测同时回答两个问题：
+这是什么形态的项目
+主要使用什么语言
+"""
 class ProjectInfo(NamedTuple):
-    project_type: str
+    project_type: ProjectType
+    language: Language
     target_analysis: str
     file_content: str
 
@@ -72,15 +59,15 @@ FRAMEWORK_DICT = {
 }
 # 检测用什么测试框架
 TEST_FRAMEWORK_DICT = {
-    "vitest": "vitest",
-    "jest": "jest",
-    "cypress": "cypress",
-    "mocha": "mocha",
-    "ava": "ava",
-    "@wdio/cli": "webdriverIO",
-    "playwright": "playwright",
-    "@playwright/test": "playwright",
-    "pytest": "pytest"
+    "vitest": TestFramework.VITEST,
+    "jest": TestFramework.JEST,
+    "cypress": TestFramework.CYPRESS,
+    "mocha": TestFramework.MOCHA,
+    "ava": TestFramework.AVA,
+    "@wdio/cli": TestFramework.WEBDRIVERIO,
+    "playwright": TestFramework.PLAYWRIGHT,
+    "@playwright/test": TestFramework.PLAYWRIGHT,
+    "pytest": TestFramework.PYTEST,
 }
 # 根据项目推荐安装测试框架
 FRAMEWORK_TEST_MAP = {
@@ -147,14 +134,16 @@ def detect_project_type(files: list[str], root: str) -> ProjectInfo | None:
         path = os.path.join(root, f)
         if f == "package.json":
             result = ProjectInfo(
-                project_type="frontend",
+                project_type=ProjectType.FRONTEND,
+                language=Language.JAVASCRIPT,
                 target_analysis="json",
                 file_content=read_file(path)
             )
             break # 找到了就跳出
         elif f == "pyproject.toml":
             result = ProjectInfo(
-                project_type="python",
+                project_type=ProjectType.BACKEND,
+                language=Language.PYTHON,
                 target_analysis="tomllib",
                 file_content=read_file(path)
             )
@@ -162,35 +151,40 @@ def detect_project_type(files: list[str], root: str) -> ProjectInfo | None:
 
         elif f == "pytest.ini" or f == "setup.cfg":
             result = ProjectInfo(
-                project_type="python",
+                project_type=ProjectType.BACKEND,
+                language=Language.PYTHON,
                 target_analysis="configparser",
                 file_content=read_file(path)
             )
-            break # 找到了就跳出
+            break # 找到了就跳出"
         elif f == "pom.xml":
             result = ProjectInfo(
-                project_type="Java",
+                project_type=ProjectType.BACKEND,
+                language=Language.JAVA,
                 target_analysis="xml.etree.ElementTree",
                 file_content=read_file(path)
             )
             break # 找到了就跳出
         elif f == "build.gradle":
             result = ProjectInfo(
-                project_type="Java",
+                project_type=ProjectType.BACKEND,
+                language=Language.JAVA,
                 target_analysis="build.gradle",
                 file_content=read_file(path)
             )
             break # 找到了就跳出
         elif f == "go.mod":
             result = ProjectInfo(
-                project_type="Go",
-                target_analysis="Go",
+                project_type=ProjectType.BACKEND,
+                language=Language.GO,
+                target_analysis="go",
                 file_content=read_file(path)
             )
             break # 找到了就跳出
         elif f == "manifest.json" or f == "pages.json":
             result = ProjectInfo(
-                project_type="Mini-program",
+                project_type=ProjectType.MINIPROGRAM,
+                language=Language.JAVASCRIPT,
                 target_analysis="json",
                 file_content=read_file(path)
             )
@@ -217,7 +211,7 @@ def analysis_go(content: str) -> dict:
     
     return deps
 
-def detect_result_list(project_info: ProjectInfo, origin_dict: dict) -> list[str]:
+def detect_result_list(project_info: ProjectInfo, origin_dict: dict) -> list[TestFramework]:
     """"""
     result = []
     package_json_content = project_info.file_content
@@ -277,7 +271,7 @@ def detect_frameworks(project_info: ProjectInfo) -> list[str]:
     return detect_result_list(project_info, FRAMEWORK_DICT)
 
 
-def detect_test_frameworks(project_info: ProjectInfo) -> list[str]:
+def detect_test_frameworks(project_info: ProjectInfo) -> list[TestFramework]:
     """解析项目使用了什么测试框架"""
     return detect_result_list(project_info, TEST_FRAMEWORK_DICT)
 
@@ -298,16 +292,16 @@ def analyze_project(target_path: str) -> AnalyzeInfo:
 
     if not detect_project_result:
         return AnalyzeInfo(
-            project_config=FrameworkInfo(project_type="unknown"),
+            project_config=FrameworkInfo(),
             project_info="框架检测： 未知"
         )
 
     config = FrameworkInfo(
-        project_type=detect_project_result.project_type or "",
-        language="",
-        frameworks=detect_frameworks(detect_project_result) or [],
-        test_framework=detect_test_frameworks(detect_project_result) or [],
-        build_tools=detect_build_tools(detect_project_result) or [],
+        project_type=detect_project_result.project_type,
+        language=detect_project_result.language,
+        frameworks=detect_frameworks(detect_project_result),
+        test_frameworks=detect_test_frameworks(detect_project_result),
+        build_tools=detect_build_tools(detect_project_result),
         has_dockerfile=False,
         has_ci_config=False,
     )

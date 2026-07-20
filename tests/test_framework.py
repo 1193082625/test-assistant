@@ -13,6 +13,9 @@ from core.analyzers.framework import (
     ProjectInfo,
 )
 
+from core.models import Language, ProjectType
+from core.models import  TestFramework as Framework
+
 def test_detect_package_json_react():
     """能从 package.json 检测到 React 项目"""
     package = {
@@ -35,14 +38,15 @@ def test_detect_package_json_react():
         result = detect_project_type(["package.json"], tmpdir)
 
         assert result is not None
-        assert result.project_type == "frontend"
+        assert result.project_type == ProjectType.FRONTEND
+        assert result.language == Language.JAVASCRIPT
 
         frameworks = detect_frameworks(result)
         assert "React" in frameworks
         assert "Next" in frameworks
 
         test_fw = detect_test_frameworks(result)
-        assert "Vitest" in test_fw
+        assert Framework.VITEST in test_fw
 
         build_tools = detect_build_tools(result)
         assert "TypeScript" in build_tools
@@ -65,7 +69,8 @@ def test_detect_pyproject_toml():
 
         result = detect_project_type(["pyproject.toml"], tmpdir)
         assert result is not None
-        assert result.project_type == "Python"
+        assert result.project_type == ProjectType.BACKEND
+        assert result.language == Language.PYTHON
 
         frameworks = detect_frameworks(result)
         assert "FastAPI" in frameworks
@@ -98,7 +103,8 @@ def test_detect_java_maven():
 
         result = detect_project_type(["pom.xml"], tmpdir)
         assert result is not None
-        assert result.project_type == "Java"
+        assert result.project_type == ProjectType.BACKEND
+        assert result.language == Language.JAVA
 
 def test_detect_go():
     """能从 go.mod 检测到 Go 项目"""
@@ -117,7 +123,8 @@ def test_detect_go():
 
         result = detect_project_type(["go.mod"], tmpdir)
         assert result is not None
-        assert result.project_type == "Go"
+        assert result.project_type == ProjectType.BACKEND
+        assert result.language == Language.GO
 
 def test_detect_uni_app():
     """能检测到 uni-app 小程序项目"""
@@ -165,8 +172,11 @@ def test_analyze_project_full():
 
         info = analyze_project(tmpdir)
 
-        assert info.project_config.project_type == "frontend"
+        assert info.project_config.project_type == ProjectType.FRONTEND
+        assert info.project_config.language == Language.JAVASCRIPT
+        assert Framework.VITEST in info.project_config.test_frameworks
+
         assert "Vue" in info.project_config.frameworks
         assert "Express" in info.project_config.frameworks
-        assert "Vitest" in info.project_config.test_framework
+        assert Framework.VITEST in info.project_config.test_frameworks
         assert "vite" in info.project_config.build_tools or "Vite" in info.project_config.build_tools

@@ -1,10 +1,13 @@
 """初始化和环境预检"""
 import os
+from copy import deepcopy
+
 import click
 import yaml
 import json
 
-from core.analyzers.framework import EXCLUDE_DIRS, analyze_project, FrameworkInfo
+from core.models import FrameworkInfo
+from core.analyzers.framework import EXCLUDE_DIRS, analyze_project
 from core.analyzers.snapshot import take_snapshot
 
 from cli.commands.plan import generate_test_plan
@@ -16,7 +19,7 @@ DEFAULT_CONFIG = {
     "project": {
         "name": "",
         "type": "auto",  # auto | frontend | backend | miniprogram
-        "test_framework": [],  # 自动检测测试框架
+        "test_frameworks": [],  # 自动检测测试框架
     },
     "test_types": {
         "unit": {"enabled": True, "priority": 1}, # 单元测试
@@ -78,12 +81,12 @@ def create_autotest_structure(target_path: str) -> dict:
 
 def write_config(autotest_path: str, project_name: str, project_config: FrameworkInfo, mode: str) -> str:
     """生成并写入 config.yml，返回配置文件路径"""
-    config = DEFAULT_CONFIG.copy()
+    config = deepcopy(DEFAULT_CONFIG) # 深拷贝
     config["project"]["name"] = project_name
-    config["project"]["type"] = project_config.project_type
-    config["project"]["language"] = project_config.language
+    config["project"]["type"] = project_config.project_type.value
+    config["project"]["language"] = project_config.language.value
     config["project"]["frameworks"] = project_config.frameworks
-    config["project"]["test_framework"] = project_config.test_framework
+    config["project"]["test_frameworks"] = [framework.value for framework in project_config.test_frameworks]
     config["project"]["build_tools"] = project_config.build_tools
     config["project"]["has_dockerfile"] = project_config.has_dockerfile
     config["project"]["has_ci_config"] = project_config.has_ci_config
@@ -100,7 +103,15 @@ def write_config(autotest_path: str, project_name: str, project_config: Framewor
     default_flow_style 控制 YAML 的输出格式， True 类似 JSON 单行； False 块式风格
     """
     with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        # yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        # safe_dump 能防止写出 Python 专属对象标签，让配置保持跨语言可读
+        yaml.safe_dump(
+            config,
+            f,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+        )
 
     return config_path
 

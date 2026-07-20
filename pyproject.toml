@@ -32,7 +32,6 @@ packages = [
     { include = "reports" },
 ]
 
-[tool.poetry.scripts]
 [dependency-groups]
 dev = [
     "pytest (>=9.1.1,<10.0.0)"
