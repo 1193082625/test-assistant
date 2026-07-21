@@ -46,7 +46,32 @@ core/
 
 ## 项目检测的完整数据流
 
+**当前检测流程可以概括为：**
+
+```
+扫描目录
+→ 选择标志文件
+→ 读取文件
+→ 根据标志与依赖初步分类
+→ 生成 ProjectInfo
+→ 提取框架、测试框架、构建工具
+→ 生成 FrameworkInfo
+→ 包装为 AnalyzeInfo
+```
+
+**异常流程是：**
+
+```
+解析失败
+→ ProjectDetectionError 或 PARSER_ERRORS
+→ unknown_analysis
+→ 返回可解释的 AnalyzeInfo
+```
+
+
+
 假设目标项目包含：
+
 ```text
 demo/
 ├── package.json

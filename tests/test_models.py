@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.models import Language, ProjectType, TestFramework as Framework, FrameworkInfo
+from core.models import Language, ProjectType, TestFramework as Framework, FrameworkInfo, ProjectAnalysis, ProjectModule
 
 
 def test_enum_values_are_stable_lowercase_string():
@@ -77,3 +77,40 @@ def test_framework_info_from_config_rejects_display_names():
             "type": "Backend",
             "language": "python",
         })
+
+def test_project_analysis_can_contain_multiple_modules():
+    frontend = ProjectModule(
+        root_path="/demo/frontend",
+        source_file="package.json",
+        framework_info=FrameworkInfo(
+            project_type=ProjectType.FRONTEND,
+            language=Language.TYPESCRIPT,
+        ),
+    )
+
+    backend = ProjectModule(
+        root_path="/demo/backend",
+        source_file="pyproject.toml",
+        framework_info=FrameworkInfo(
+            project_type=ProjectType.BACKEND,
+            language=Language.PYTHON,
+        ),
+    )
+
+    analysis = ProjectAnalysis(
+        root_path="/demo",
+        modules=[frontend, backend],
+    )
+
+    assert len(analysis.modules) == 2
+    assert analysis.modules[0].framework_info.project_type is ProjectType.FRONTEND
+    assert analysis.modules[1].framework_info.language is Language.PYTHON
+
+def test_project_analysis_lists_are_not_shared():
+    frist = ProjectAnalysis(root_path="/frist")
+    second = ProjectAnalysis(root_path="/second")
+
+    frist.warnings.append("demo warning")
+
+    assert frist.warnings == ["demo warning"]
+    assert second.warnings == []

@@ -47,3 +47,18 @@ class FrameworkInfo:
             has_dockerfile=bool(config.get("has_dockerfile", False)),
             has_ci_config=bool(config.get("has_ci_config", False)),
         )
+
+@dataclass
+class ProjectModule:
+    """目标项目中的一个可独立分析模块"""
+
+    root_path: str
+    source_file: str
+    framework_info: FrameworkInfo
+
+@dataclass
+class ProjectAnalysis:
+    """目标目录的多模块分析结果"""
+    root_path: str
+    modules: list[ProjectModule] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
