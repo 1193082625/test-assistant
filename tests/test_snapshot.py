@@ -13,10 +13,12 @@ def test_get_file_snapshot():
         tmp_path = f.name
 
     try:
-        snap = get_file_snapshot(tmp_path)
+        root_dir = os.path.dirname(tmp_path)
+        snap = get_file_snapshot(tmp_path, root_dir)
 
         assert isinstance(snap, Snapshot)
-        assert snap.path == tmp_path
+        # 文件相对于其父目录的路径就是文件名
+        assert snap.path == os.path.basename(tmp_path)
         assert snap.type == ".txt"
         assert snap.size == 11 # "hello world" 是 11 个字节
 
@@ -43,8 +45,20 @@ def test_take_snapshot_with_excludes():
 
         snapshots, skipped = take_snapshot(tmpdir, excludes=["node_modules"])
 
+        assert skipped == 0
         assert len(snapshots) == 1
-        assert snapshots[0].path == normal_file
+        assert snapshots[0].path == "normal.py"
 
+def test_take_snapshot_stores_project_relative_paths(tmp_path):
+    """测试保存相对于项目根目录的路径"""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
 
+    (src_dir / "app.py").write_text("print('hello world')", encoding="utf-8")
+
+    snapshots, skipped = take_snapshot(str(tmp_path), excludes=[])
+
+    assert skipped == 0
+    assert len(snapshots) == 1
+    assert snapshots[0].path == "src/app.py"
 
