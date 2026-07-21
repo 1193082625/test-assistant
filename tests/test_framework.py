@@ -11,10 +11,10 @@ from core.analyzers.framework import (
     detect_test_frameworks,
     detect_build_tools,
     analyze_project,
-    ProjectInfo,
+    build_framework_info, analyze_project_modules,
 )
 
-from core.models import Language, ProjectType
+from core.models import Language, ProjectType, ProjectAnalysis
 from core.models import  TestFramework as Framework
 
 @pytest.mark.parametrize(
@@ -290,3 +290,123 @@ def test_analyze_valid_package_without_known_framework_is_explainable(tmp_path):
     assert info.project_config.language is Language.JAVASCRIPT
     assert "package.json" in info.project_info
     assert "未识别到支持的框架依赖" in info.project_info
+
+def test_build_framework_info_from_project_info(tmp_path):
+    """测试 build_framework_info 函数"""
+    package = {
+        "dependencies": {
+            "express": "^5.0.0",
+        },
+        "devDependencies": {
+            "vitest": "^3.0.0",
+        },
+    }
+
+    (tmp_path / "package.json").write_text(
+        json.dumps(package),
+        encoding="utf-8",
+    )
+
+    project_info = detect_project_type(["package.json"], str(tmp_path))
+
+    assert project_info is not None
+
+    framework_info = build_framework_info(project_info)
+
+    assert framework_info.project_type is ProjectType.BACKEND
+    assert framework_info.language is Language.JAVASCRIPT
+    assert "Express" in framework_info.frameworks
+    assert Framework.VITEST in framework_info.test_frameworks
+
+def test_analyze_project_modules_collects_all_modules(tmp_path):
+    frontend_dir = tmp_path / "frontend"
+    backend_dir = tmp_path / "backend"
+
+    frontend_dir.mkdir()
+    backend_dir.mkdir()
+
+    (frontend_dir / "package.json").write_text(
+        json.dumps({
+            "dependencies": {
+                "react": "^19.0.0",
+                "typescript": "^5.0.0",
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    (backend_dir / "pyproject.toml").write_text(
+        """
+        [project]
+        name="backend"
+        dependencies=["fastapi>=0.100.0"]
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    analysis = analyze_project_modules(str(tmp_path))
+
+    modules_by_name = {
+        os.path.basename(module.root_path): module for module in analysis.modules
+    }
+
+    assert set(modules_by_name) == {"frontend", "backend"}
+
+    frontend = modules_by_name["frontend"]
+    assert frontend.source_file == "package.json"
+    assert frontend.framework_info.project_type is ProjectType.FRONTEND
+    assert frontend.framework_info.language is Language.TYPESCRIPT
+    assert "React" in frontend.framework_info.frameworks
+
+    backend = modules_by_name["backend"]
+    assert backend.source_file == "pyproject.toml"
+    assert backend.framework_info.project_type is ProjectType.BACKEND
+    assert backend.framework_info.language is Language.PYTHON
+    assert "FastAPI" in backend.framework_info.frameworks
+
+def test_analyze_project_modules_isolates_broken_module(tmp_path):
+    """测试一个损坏模块不能阻断其他模块"""
+    backend_dir = tmp_path / "backend"
+    frontend_dir = backend_dir / "broken-frontend"
+
+    backend_dir.mkdir()
+    frontend_dir.mkdir()
+
+    (backend_dir / "pyproject.toml").write_text(
+        """
+        [project]
+        name="backend"
+        dependencies=["fastapi>=0.100.0"]
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    (frontend_dir / "package.json").write_text(
+        "{ invalid json",
+        encoding="utf-8",
+    )
+
+    analysis = analyze_project_modules(str(tmp_path))
+
+    modules_by_name = {
+        os.path.basename(module.root_path): module for module in analysis.modules
+    }
+
+    assert set(modules_by_name) == {"backend", "broken-frontend"}
+
+    backend = modules_by_name["backend"]
+    assert backend.framework_info.language is Language.PYTHON
+
+    broken = modules_by_name["broken-frontend"]
+    assert broken.source_file == "package.json"
+    assert broken.framework_info.project_type is ProjectType.UNKNOWN
+    assert broken.framework_info.language is Language.UNKNOWN
+
+    expected_path = os.path.join(
+        "broken-frontend",
+        "package.json",
+    )
+    assert any(
+        expected_path in warning and "解析失败" in warning
+        for warning in analysis.warnings
+    )

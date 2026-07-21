@@ -50,7 +50,10 @@ class FrameworkInfo:
 
 @dataclass
 class ProjectModule:
-    """目标项目中的一个可独立分析模块"""
+    """
+    目标项目中的一个可独立分析模块
+    表示一个模块的最终分析结果，包含模块根目录、标志文件和 FrameworkInfo
+    """
 
     root_path: str
     source_file: str
@@ -58,7 +61,9 @@ class ProjectModule:
 
 @dataclass
 class ProjectAnalysis:
-    """目标目录的多模块分析结果"""
+    """
+    目标目录的多模块分析结果，即整个目标目录的分析结果
+    """
     root_path: str
     modules: list[ProjectModule] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

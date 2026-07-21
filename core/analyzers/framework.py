@@ -20,7 +20,7 @@ import xml.etree.ElementTree as ET
 import yaml
 import json
 
-from core.models import FrameworkInfo, Language, ProjectType, TestFramework
+from core.models import FrameworkInfo, Language, ProjectType, TestFramework, ProjectAnalysis, ProjectModule
 
 from configparser import Error as ConfigParserError
 
@@ -30,6 +30,7 @@ from configparser import Error as ConfigParserError
 主要使用什么语言
 """
 class ProjectInfo(NamedTuple):
+    """表示一个标志文件产生的中间检测证据，包含初步类型、语言、来源文件、解析器和原始内容"""
     project_type: ProjectType
     language: Language
     source_file: str # 告诉系统当前结论来自哪个文件
@@ -39,10 +40,10 @@ class ProjectInfo(NamedTuple):
 # 定义可解释的检测异常
 class ProjectDetectionError(ValueError):
     """项目标志文件无法解析"""
-    def __init__(self, source_info: str, reason: str):
-        self.source_info = source_info
+    def __init__(self, source_file: str, reason: str):
+        self.source_file = source_file
         self.reason = reason
-        super().__init__(f"{source_info} 解析失败： {reason}")
+        super().__init__(f"{source_file} 解析失败： {reason}")
 
 
 class AnalyzeInfo(NamedTuple):
@@ -415,6 +416,73 @@ def detect_build_tools(project_info: ProjectInfo) -> list[str]:
     """解析项目使用了什么构建工具"""
     return detect_result_list(project_info, BUILD_TOOL_DICT)
 
+def build_framework_info(project_info: ProjectInfo) -> FrameworkInfo:
+    """将一个标志文件的中间证据整理为模块分析结果"""
+    return FrameworkInfo(
+        project_type=project_info.project_type,
+        language=project_info.language,
+        frameworks=detect_frameworks(project_info),
+        test_frameworks=detect_test_frameworks(project_info),
+        build_tools=detect_build_tools(project_info),
+        has_dockerfile=False,
+        has_ci_config=False,
+    )
+
+def analyze_project_modules(target_path: str) -> ProjectAnalysis:
+    """扫描目标目录并分析其中所有项目模块"""
+    analysis = ProjectAnalysis(root_path=target_path)
+
+    for root, dirs, files in os.walk(target_path):
+        # sorted 用于保证遍历子目录的顺序稳定，不受文件系统返回顺序影响
+        dirs[:] = sorted(d for d in dirs if d not in EXCLUDE_DIRS)
+
+        try:
+            project_info = detect_project_type(files, root)
+        except ProjectDetectionError as exc:
+            analysis.modules.append(
+                ProjectModule(
+                    root_path=root,
+                    source_file=exc.source_file,
+                    framework_info=FrameworkInfo()
+                )
+            )
+            relative_path = os.path.relpath(
+                os.path.join(root, exc.source_file),
+                target_path
+            )
+            analysis.warnings.append(
+                f"{relative_path} 解析失败：{exc.reason}"
+            )
+
+            continue
+
+        if project_info is None:
+            continue
+
+        try:
+            framework_info = build_framework_info(project_info)
+        except PARSER_ERRORS as exc:
+            framework_info = FrameworkInfo()
+
+            relative_path = os.path.relpath(
+                os.path.join(root, project_info.source_file),
+                target_path
+            )
+
+            analysis.warnings.append(
+                f"{relative_path} 解析失败：{exc}"
+            )
+
+        module = ProjectModule(
+            root_path=root,
+            source_file=project_info.source_file,
+            framework_info=framework_info,
+        )
+
+        analysis.modules.append(module)
+
+    return analysis
+
 def analyze_project(target_path: str) -> AnalyzeInfo:
     """项目检测入口函数"""
     detect_project_result = None
@@ -424,7 +492,7 @@ def analyze_project(target_path: str) -> AnalyzeInfo:
             result = detect_project_type(files, root)
         except ProjectDetectionError as exc:
             return unknown_analysis(
-                exc.source_info,
+                exc.source_file,
                 exc.reason
             )
 
@@ -442,15 +510,7 @@ def analyze_project(target_path: str) -> AnalyzeInfo:
         )
 
     try:
-        config = FrameworkInfo(
-            project_type=detect_project_result.project_type,
-            language=detect_project_result.language,
-            frameworks=detect_frameworks(detect_project_result),
-            test_frameworks=detect_test_frameworks(detect_project_result),
-            build_tools=detect_build_tools(detect_project_result),
-            has_dockerfile=False,
-            has_ci_config=False,
-        )
+        config = build_framework_info(detect_project_result)
         if config.project_type is ProjectType.UNKNOWN:
             return AnalyzeInfo(
                 project_config=config,
