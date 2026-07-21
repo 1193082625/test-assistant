@@ -25,11 +25,7 @@ from core.models import  TestFramework as Framework
         ("pom.xml", "<project><invalid></project>"),
     ],
 )
-def test_analyze_project_invalid_config_returns_explainable_unknown(
-        tmp_path,
-        filename,
-        content,
-):
+def test_analyze_project_invalid_config_returns_explainable_unknown(tmp_path, filename, content):
     (tmp_path / filename).write_text(content, encoding="utf-8")
     info = analyze_project(str(tmp_path))
 
@@ -77,6 +73,8 @@ def test_detect_package_json_express_as_backend(tmp_path):
     assert result is not None
     assert result.project_type is ProjectType.BACKEND
     assert result.language == Language.JAVASCRIPT
+    assert result.source_file == "package.json"
+    assert result.target_analysis == "json"
 
 def test_detect_package_json_react():
     """能从 package.json 检测到 React 项目"""
@@ -242,3 +240,33 @@ def test_analyze_project_full():
         assert "Express" in info.project_config.frameworks
         assert Framework.VITEST in info.project_config.test_frameworks
         assert "vite" in info.project_config.build_tools or "Vite" in info.project_config.build_tools
+
+def test_analyze_unknown_project_explains_missing_marker(tmp_path):
+    """测试没有检测证据 --> 未发现支持的项目标志文件"""
+    # 在 pytest 提供的临时目录中创建一个 README.md 文件，并且写入 “# unknown project”
+    (tmp_path / "README.md").write_text(
+        "# unknown project",
+        encoding="utf-8",
+    )
+
+    info = analyze_project(str(tmp_path))
+
+    assert info.project_config.project_type is ProjectType.UNKNOWN
+    assert info.project_config.language is Language.UNKNOWN
+    assert "未发现支持的项目标志文件" in info.project_info
+
+def test_analyze_valid_package_without_known_framework_is_explainable(tmp_path):
+    package = {
+        "name": "my-tool",
+        "dependencies": {}
+    }
+
+    (tmp_path / "package.json").write_text(
+        json.dumps(package),
+        encoding="utf-8",
+    )
+    info = analyze_project(str(tmp_path))
+    assert info.project_config.project_type is ProjectType.UNKNOWN
+    assert info.project_config.language is Language.JAVASCRIPT
+    assert "package.json" in info.project_info
+    assert "未识别到支持的框架依赖" in info.project_info

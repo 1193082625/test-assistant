@@ -435,7 +435,10 @@ def analyze_project(target_path: str) -> AnalyzeInfo:
     if not detect_project_result:
         return AnalyzeInfo(
             project_config=FrameworkInfo(),
-            project_info="框架检测： 未知"
+            project_info=(
+                "框架检测： 未知"
+                "（未发现支持的项目标志文件）"
+            )
         )
 
     try:
@@ -448,6 +451,15 @@ def analyze_project(target_path: str) -> AnalyzeInfo:
             has_dockerfile=False,
             has_ci_config=False,
         )
+        if config.project_type is ProjectType.UNKNOWN:
+            return AnalyzeInfo(
+                project_config=config,
+                project_info=(
+                    "框架检测：未知"
+                    f"（{detect_project_result.source_file} "
+                    "未识别到支持的框架依赖）"
+                )
+            )
     # 不要使用 except Exception , 否则 AttributeError、变量拼写错误等程序缺陷也会被伪装成“配置解析失败”
     except PARSER_ERRORS as exc:
         return unknown_analysis(
