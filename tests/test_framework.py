@@ -3,6 +3,7 @@
 import json
 import  os
 import tempfile
+import pytest
 
 from core.analyzers.framework import (
     detect_project_type,
@@ -15,6 +16,67 @@ from core.analyzers.framework import (
 
 from core.models import Language, ProjectType
 from core.models import  TestFramework as Framework
+
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        ("package.json", "{ invalid json"),
+        ("pyproject.toml", "[project\ninvalid"),
+        ("pom.xml", "<project><invalid></project>"),
+    ],
+)
+def test_analyze_project_invalid_config_returns_explainable_unknown(
+        tmp_path,
+        filename,
+        content,
+):
+    (tmp_path / filename).write_text(content, encoding="utf-8")
+    info = analyze_project(str(tmp_path))
+
+    assert info.project_config.project_type is ProjectType.UNKNOWN
+    assert info.project_config.language is Language.UNKNOWN
+    assert filename in info.project_info
+    assert "解析失败" in info.project_info
+
+# @pytest.mark.parametrize 会用两组 files 分别执行同一个测试，相当于自动生成两个测试场景
+@pytest.mark.parametrize(
+    "files",
+    [
+        ["package.json", "pages.json"],
+        ["pages.json", "package.json"],
+    ],
+)
+def test_detect_miniprogram_is_independent_of_file_order(tmp_path, files):
+    """验证文件顺序不应影响结果"""
+    package = {
+        "dependencies": {
+            "@dcloudio/uni-app": "^3.0.0",
+        }
+    }
+
+    (tmp_path / "package.json").write_text(json.dumps(package), encoding="utf-8")
+
+    (tmp_path / "pages.json").write_text("{}", encoding="utf-8")
+
+    result = detect_project_type(files, str(tmp_path))
+    assert result is not None
+    assert result.project_type is ProjectType.MINIPROGRAM
+    assert result.language == Language.JAVASCRIPT
+
+def test_detect_package_json_express_as_backend(tmp_path):
+    """证明 package.json 不一定是前端"""
+    package = {
+        "dependencies": {
+            "express": "^5.0.0"
+        }
+    }
+
+    (tmp_path / "package.json").write_text(json.dumps(package), encoding="utf-8")
+
+    result = detect_project_type(["package.json"], str(tmp_path))
+    assert result is not None
+    assert result.project_type is ProjectType.BACKEND
+    assert result.language == Language.JAVASCRIPT
 
 def test_detect_package_json_react():
     """能从 package.json 检测到 React 项目"""
@@ -39,7 +101,7 @@ def test_detect_package_json_react():
 
         assert result is not None
         assert result.project_type == ProjectType.FRONTEND
-        assert result.language == Language.JAVASCRIPT
+        assert result.language is Language.TYPESCRIPT
 
         frameworks = detect_frameworks(result)
         assert "React" in frameworks
@@ -172,7 +234,7 @@ def test_analyze_project_full():
 
         info = analyze_project(tmpdir)
 
-        assert info.project_config.project_type == ProjectType.FRONTEND
+        assert info.project_config.project_type is ProjectType.BACKEND
         assert info.project_config.language == Language.JAVASCRIPT
         assert Framework.VITEST in info.project_config.test_frameworks
 
