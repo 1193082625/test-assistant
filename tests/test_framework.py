@@ -206,6 +206,25 @@ def test_detect_uni_app():
         frameworks = detect_frameworks(result)
         assert "uni-app" in frameworks
 
+def test_detect_pytest_ini_uses_correct_source_file(tmp_path):
+    """pytest.nin 检测测试"""
+    (tmp_path / "pytest.ini").write_text(
+        """
+        [pytest]
+        testpaths = tests
+        """.strip(),
+        encoding="utf-8",
+    )
+    result = detect_project_type(["pytest.ini"], str(tmp_path))
+    assert result is not None
+    assert result.project_type is ProjectType.BACKEND
+    assert result.language is Language.PYTHON
+    assert result.source_file == "pytest.ini"
+    assert result.target_analysis == "configparser"
+
+    test_frameworks = detect_test_frameworks(result)
+    assert Framework.PYTEST in test_frameworks
+
 def test_detect_unknown_project():
     """未知项目应返回 None"""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -256,6 +275,7 @@ def test_analyze_unknown_project_explains_missing_marker(tmp_path):
     assert "未发现支持的项目标志文件" in info.project_info
 
 def test_analyze_valid_package_without_known_framework_is_explainable(tmp_path):
+    """有合法标志文件，但没有识别到已支持的框架"""
     package = {
         "name": "my-tool",
         "dependencies": {}
