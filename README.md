@@ -70,43 +70,92 @@ core/
 
 
 
-假设目标项目包含：
+假设目录是：
 
-```text
+```
 demo/
-├── package.json
-└── src/
+├── frontend/
+│   └── package.json
+├── backend/
+│   └── pyproject.toml
+└── broken-worker/
+    └── package.json
 ```
-其中 `package.json` 是：
-```json
-{
-  "dependencies": {
-    "express": "^5.0.0"
-  }
-}
+
+执行：
+
 ```
-执行流程如下：
+analysis = analyze_project_modules("/demo")
+```
+
+
+流程为：
 ```mermaid
 flowchart TD
-    A["analyze_project(demo)"] --> B["os.walk 扫描目录"]
-    B --> C["detect_project_type(files, root)"]
-    C --> D["读取 package.json"]
-    D --> E["提取 dependencies"]
-    E --> F["发现 express 属于后端证据"]
-    F --> G["生成 ProjectInfo"]
-    G --> H["识别框架、测试框架、构建工具"]
-    H --> I["生成 FrameworkInfo"]
+    A["analyze_project_modules"] --> B["os.walk 扫描全部目录"]
+    B --> C["detect_project_type"]
+    C --> D["ProjectInfo"]
+    D --> E["build_framework_info"]
+    E --> F["FrameworkInfo"]
+    F --> G["ProjectModule"]
+    G --> H["ProjectAnalysis.modules"]
+
+    C -->|ProjectDetectionError| I["unknown ProjectModule"]
+    E -->|PARSER_ERRORS| I
+    I --> J["ProjectAnalysis.warnings"]
 ```
-最终结果大致是：
+
+
+最终结果类似：
+
 ```
-FrameworkInfo(
-    project_type=ProjectType.BACKEND,
-    language=Language.JAVASCRIPT,
-    frameworks=["Express"],
-    test_frameworks=[],
-    build_tools=[],
+ProjectAnalysis(
+    root_path="/demo",
+    modules=[
+        ProjectModule(
+            root_path="/demo/frontend",
+            source_file="package.json",
+            framework_info=FrameworkInfo(
+                project_type=ProjectType.FRONTEND,
+                language=Language.TYPESCRIPT,
+            ),
+        ),
+        ProjectModule(
+            root_path="/demo/backend",
+            source_file="pyproject.toml",
+            framework_info=FrameworkInfo(
+                project_type=ProjectType.BACKEND,
+                language=Language.PYTHON,
+            ),
+        ),
+        ProjectModule(
+            root_path="/demo/broken-worker",
+            source_file="package.json",
+            framework_info=FrameworkInfo(),
+        ),
+    ],
+    warnings=[
+        "broken-worker/package.json 解析失败：...",
+    ],
 )
 ```
+
+计算整体类型时：
+
+```
+known_types = {
+    ProjectType.FRONTEND,
+    ProjectType.BACKEND,
+}
+```
+
+unknown 模块被忽略，因此：
+
+```
+analysis.primary_type is ProjectType.MIXED
+```
+
+
 
 ## ProjectInfo 和 FrameworkInfo 有什么区别
 

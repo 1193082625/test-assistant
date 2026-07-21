@@ -67,3 +67,24 @@ class ProjectAnalysis:
     root_path: str
     modules: list[ProjectModule] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def primary_type(self) -> ProjectType:
+        """根据所有已识别模块计算项目整体类型"""
+
+        # 从所有模块中取出已识别的项目类型，排除 unknown，并自动驱虫
+        # {...} 表示创建 set，集合会自动去重
+        known_types = {
+            module.framework_info.project_type
+            for module in self.modules
+            if module.framework_info.project_type
+            is not ProjectType.UNKNOWN
+        }
+
+        if not known_types:
+            return ProjectType.UNKNOWN
+
+        if len(known_types) == 1:
+            return list(known_types)[0]
+
+        return ProjectType.MIXED

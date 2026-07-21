@@ -14,7 +14,7 @@ from core.analyzers.framework import (
     build_framework_info, analyze_project_modules,
 )
 
-from core.models import Language, ProjectType, ProjectAnalysis
+from core.models import Language, ProjectType, ProjectAnalysis, ProjectModule, FrameworkInfo
 from core.models import  TestFramework as Framework
 
 @pytest.mark.parametrize(
@@ -364,6 +364,8 @@ def test_analyze_project_modules_collects_all_modules(tmp_path):
     assert backend.framework_info.language is Language.PYTHON
     assert "FastAPI" in backend.framework_info.frameworks
 
+    assert analysis.primary_type is ProjectType.MIXED
+
 def test_analyze_project_modules_isolates_broken_module(tmp_path):
     """测试一个损坏模块不能阻断其他模块"""
     backend_dir = tmp_path / "backend"
@@ -410,3 +412,105 @@ def test_analyze_project_modules_isolates_broken_module(tmp_path):
         expected_path in warning and "解析失败" in warning
         for warning in analysis.warnings
     )
+
+def test_analyze_project_modules_isolates_parser_error(tmp_path):
+    frontend_dir = tmp_path / "frontend"
+    backend_dir = frontend_dir / "broken-backend"
+
+    frontend_dir.mkdir()
+    backend_dir.mkdir()
+
+    (frontend_dir / "package.json").write_text(
+        json.dumps({
+            "dependencies": {
+                "react": "^19.0.0",
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    (backend_dir / "pyproject.toml").write_text(
+        "[project\ninvalid",
+        encoding="utf-8",
+    )
+
+    analysis = analyze_project_modules(str(tmp_path))
+
+    modules_by_name = {}
+
+    for module in analysis.modules:
+        module_name = os.path.basename(module.root_path)
+        modules_by_name[module_name] = module
+
+    assert set(modules_by_name) == {
+        "frontend",
+        "broken-backend",
+    }
+
+    frontend = modules_by_name["frontend"]
+    assert frontend.framework_info.project_type is ProjectType.FRONTEND
+
+    backend = modules_by_name["broken-backend"]
+    assert backend.source_file == "pyproject.toml"
+    assert backend.framework_info.project_type is ProjectType.UNKNOWN
+    assert backend.framework_info.language is Language.UNKNOWN
+
+    expected_path = os.path.join(
+        "broken-backend",
+        "pyproject.toml",
+    )
+
+    assert any(
+        expected_path in warning and "解析失败" in warning
+        for warning in analysis.warnings
+    )
+
+def test_project_analysis_primary_type_is_mixed():
+    analysis = ProjectAnalysis(
+        root_path="/demo",
+        modules=[
+            ProjectModule(
+                root_path="/demo/frontend",
+                source_file="package.json",
+                framework_info=FrameworkInfo(
+                    project_type=ProjectType.FRONTEND,
+                ),
+            ),
+            ProjectModule(
+                root_path="/demo/backend",
+                source_file="pyproject.toml",
+                framework_info=FrameworkInfo(
+                    project_type=ProjectType.BACKEND,
+                ),
+            ),
+        ],
+    )
+
+    assert analysis.primary_type is ProjectType.MIXED
+
+def test_project_analysis_primary_type_ignores_broken_module():
+    analysis = ProjectAnalysis(
+        root_path="/demo",
+        modules=[
+            ProjectModule(
+                root_path="/demo/backend",
+                source_file="pyproject.toml",
+                framework_info=FrameworkInfo(
+                    project_type=ProjectType.BACKEND,
+                ),
+            ),
+            ProjectModule(
+                root_path="/demo/broken",
+                source_file="package.json",
+                framework_info=FrameworkInfo()
+            ),
+        ],
+    )
+
+    assert analysis.primary_type is ProjectType.BACKEND
+
+def test_empty_project_analysis_primary_type_is_unknown():
+    analysis = ProjectAnalysis(
+        root_path="/demo",
+    )
+    assert analysis.primary_type is ProjectType.UNKNOWN

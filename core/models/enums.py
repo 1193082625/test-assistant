@@ -6,6 +6,7 @@ class ProjectType(StrEnum):
     FRONTEND = "frontend"
     BACKEND = "backend"
     MINIPROGRAM = "miniprogram"
+    MIXED = "mixed"
     UNKNOWN = "unknown"
 
 
