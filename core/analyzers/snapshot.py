@@ -61,6 +61,13 @@ class Snapshot:
 class SnapshotManifest:
     """一个完整的、带版本的项目快照"""
 
+    """
+    version表示快照文件格式版本。用于识别 snapshot.json 的数据结构，使读取端能够校验、兼容或迁移不同版本的快照格式
+    读取时可以据此决定
+    - 当前格式支持：正常解析
+    - 旧格式可迁移：执行转换
+    - 未知格式：明确报错，避免错误比较
+    """
     version: int = SNAPSHOT_FORMAT_VERSION
     files: list[Snapshot] = field(default_factory=list)
 
