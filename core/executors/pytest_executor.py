@@ -2,7 +2,8 @@
 import subprocess
 import re
 
-from core.executors.base import BaseExecutor, TestResult
+from core.executors.base import BaseExecutor, TestResult, ExecutionReport
+
 
 class PytestExecutor(BaseExecutor):
     """调用 pytest 执行测试文件"""
@@ -11,7 +12,7 @@ class PytestExecutor(BaseExecutor):
     def can_handle(self, file_path: str) -> bool:
         return file_path.endswith(".py") and ("test_" in file_path or "_test" in file_path)
 
-    def execute(self, file_path: str) -> list[TestResult]:
+    def execute(self, file_path: str) -> ExecutionReport:
         # 用 subprocess 跑 pytest，只输出简洁结果
         result = subprocess.run(
             ["python", "-m", "pytest", file_path, "-v", "--tb=short"],
@@ -20,7 +21,22 @@ class PytestExecutor(BaseExecutor):
             timeout=120,
             cwd=self.cwd,
         )
-        return self._parse_output(result.stdout, result.returncode)
+        # 解析出的每一条测试用例结果
+        test_results = self._parse_output(result.stdout, result.returncode)
+
+        # error_type 表示整个 pytest 命令是否正常完成
+        if result.returncode == 1:
+            error_type = "test_failure"
+        elif result.returncode != 0:
+            error_type = "runner_error"
+
+        return ExecutionReport(
+            test_results=test_results,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.returncode,
+            error_type=error_type,
+        )
 
     def _parse_output(self, stdout: str, returncode: int) -> list[TestResult]:
         """解析 pytest 的 -v 输出"""

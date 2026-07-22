@@ -1,5 +1,7 @@
+import subprocess
+
 from core.executors import select_executor, VitestExecutor
-from core.executors.base import ExecutionReport
+from core.executors.base import ExecutionReport, BaseExecutor, TestResult
 from core.executors.pytest_executor import PytestExecutor
 
 def test_select_executor_returns_pytest_executor():
@@ -56,3 +58,26 @@ def test_execution_report_distinguishes_runner_failure_from_success():
     assert failed_report.stderr == "ERROR: test file not found"
 
     assert successful_report.successful is True
+
+def test_pytest_executor_reports_runner_failure(monkeypatch):
+    def fake_fun(*args, **kwargs):
+        # subprocess.CompletedProcess 是 subprocess.run() 正常返回的结果类型。
+        # 模拟一个假进程，pytest 的退出码 4 表示命令用法或调用层面的错误，不是普通测试断言失败
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=4,
+            stdout="",
+            stderr="ERROR: test file not found",
+        )
+
+    monkeypatch.setattr("core.executors.pytest_executor.subprocess.run", fake_fun)
+
+    executor = PytestExecutor(cwd="/demo")
+    report = executor.execute("missing_test.py")
+
+    assert report.test_results == []
+    assert report.stdout == ""
+    assert report.stderr == "ERROR: test file not found"
+    assert report.exit_code == 4
+    assert report.error_type == "runner_error"
+    assert report.successful is False
