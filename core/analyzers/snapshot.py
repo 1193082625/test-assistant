@@ -1,7 +1,7 @@
 """
 快照核心模块
 """
-
+import json
 from dataclasses import dataclass, field
 import hashlib
 import os
@@ -150,6 +150,12 @@ def get_file_snapshot(file_path: str, root_dir: str) -> Snapshot:
         type=file_path_obj.suffix, # 扩展名
     )
 
+def read_snapshot_manifest(snapshot_path: str) -> SnapshotManifest:
+    """从 JSON 文件读取并恢复快照清单"""
+    with open(snapshot_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    return SnapshotManifest.from_dict(data)
 
 def take_snapshot(root_dir: str, excludes: list[str], max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> tuple[list[Snapshot], int]:
     snapshots = []

@@ -3,7 +3,6 @@
 调用具体的测试执行器 -- core/executors
 调用框架分析、快照对比 -- core/analyzers
 """
-import json
 import os.path
 from typing import TypedDict, Annotated
 
@@ -46,12 +45,11 @@ def detect_change_node(state: GraphStates) -> dict:
     target_path = state["project_info"].project_path
     snapshot_path = os.path.join(target_path, ".autotest", "snapshot.json")
     # 加载旧快照
-    with open(snapshot_path) as f:
-        old_snapshots = json.load(f)
+    from core.analyzers.snapshot import read_snapshot_manifest, take_snapshot
+    old_manifest = read_snapshot_manifest(snapshot_path)
 
     # 拍新快照（take_snapshot）
     # 延迟导入（调用时才 import，第一次慢，之后缓存），避免循环引用
-    from core.analyzers.snapshot import take_snapshot
     from core.analyzers.framework import EXCLUDE_DIRS
     new_snapshots, _ = take_snapshot(target_path, EXCLUDE_DIRS)
 
@@ -68,7 +66,10 @@ def detect_change_node(state: GraphStates) -> dict:
     # 删除 = old_paths - new_paths
     # 修改 = old_paths & new_paths and hash 不同
     """
-    old_map = {item["path"]: item["hash"] for item in old_snapshots}
+    old_map = {
+        s.path: s.hash
+        for s in old_manifest.files
+    }
     new_map = {item.path: item.hash for item in new_snapshots}
 
     old_paths = set(old_map.keys())

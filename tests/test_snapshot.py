@@ -3,11 +3,17 @@
 import os
 import hashlib
 import tempfile
-
+import json
 import pytest
 
-from core.analyzers.snapshot import get_file_snapshot, take_snapshot, Snapshot, SnapshotManifest, \
-    SNAPSHOT_FORMAT_VERSION
+from core.analyzers.snapshot import (
+    get_file_snapshot,
+    take_snapshot,
+    Snapshot,
+    SnapshotManifest,
+    SNAPSHOT_FORMAT_VERSION,
+    read_snapshot_manifest
+)
 
 
 def test_get_file_snapshot():
@@ -144,3 +150,29 @@ def test_snapshot_manifest_rejects_unsupported_version():
             "version": 1,
             "files": []
         })
+
+def test_read_snapshot_manifest_from_file(tmp_path):
+    """测试统一的读取函数"""
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(
+        # json.dumps 用于把 Python 字典 转换成 JSON 字符串
+        # json.dump 是直接把数据写进一个对象
+        json.dumps({
+            "version": SNAPSHOT_FORMAT_VERSION,
+            "files": [
+                {
+                    "path": "src/app.py",
+                    "hash": "abc123",
+                    "size": 10,
+                    "mtime": 123.0,
+                    "type": ".py"
+                }
+            ],
+        }),
+        encoding="utf-8"
+    )
+    manifest = read_snapshot_manifest(str(snapshot_path))
+
+    assert manifest.version == SNAPSHOT_FORMAT_VERSION
+    assert len(manifest.files) == 1
+    assert manifest.files[0].path == "src/app.py"

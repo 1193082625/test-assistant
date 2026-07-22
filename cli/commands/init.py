@@ -8,7 +8,7 @@ import json
 
 from core.models import FrameworkInfo
 from core.analyzers.framework import EXCLUDE_DIRS, analyze_project
-from core.analyzers.snapshot import take_snapshot
+from core.analyzers.snapshot import take_snapshot, Snapshot, SnapshotManifest
 
 from cli.commands.plan import generate_test_plan
 
@@ -78,6 +78,15 @@ def create_autotest_structure(target_path: str) -> dict:
         "created_paths": created_paths,
     }
 
+def write_snapshot_manifest(autotest_path: str, snapshots: list[Snapshot]) -> str:
+    """将带版本的文件快照写入 snapshot.json"""
+    manifest = SnapshotManifest(files=snapshots)
+    snapshots_path = os.path.join(autotest_path, "snapshot.json")
+
+    with open(snapshots_path, "w", encoding="utf-8") as f:
+        json.dump(manifest.to_dict(), f, indent=4, ensure_ascii=False)
+
+    return snapshots_path
 
 def write_config(autotest_path: str, project_config: FrameworkInfo, mode: str) -> str:
     """生成并写入 config.yml，返回配置文件路径"""
@@ -192,19 +201,10 @@ def init(path, name, mode):
         # 获取文件快照
         snapshots, skipped = take_snapshot(target_path, EXCLUDE_DIRS)
         # 获取要写入的快照文件地址
-        snapshot_path = os.path.join(result["autotest_path"], "snapshot.json")
-        # 写入文件
-        with open(snapshot_path, 'w', encoding="utf-8") as f:
-            """
-            把 Python 对象 -> JSON 字符串 -> 写入文件
-            这里的 s.__dict__ 是 @dataclass 自动生成的，能把对象转为字典
-            __dict__ 是 Python 每个对象都有的属性，存的是实例的所有字段（Snapshot对象） -> 字典
-            f 文件对象，序列化结果直接写入文件
-            indent=2 JSON 输出缩进2个空格，美化可读性
-            default=str 遇到 JSON 不认识的对象时，调用 str() 转成字符串
-            """
-            json.dump([s.__dict__ for s in snapshots], f, indent=2, default=str)
-
+        snapshot_path = write_snapshot_manifest(
+            autotest_path=result["autotest_path"],
+            snapshots=snapshots,
+        )
 
         click.echo(f"\n✅ 写入： {os.path.relpath(snapshot_path, target_path)}")
         click.echo(f"\n📷 文件快照：{len(snapshots)} 个文件（跳过 {skipped} 个）")

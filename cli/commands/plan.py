@@ -6,6 +6,7 @@ import click
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 
+from core.analyzers.snapshot import read_snapshot_manifest
 from core.llm.client import LLMClient
 
 from pydantic import BaseModel, Field
@@ -20,6 +21,15 @@ class TestConfigSuggestion(BaseModel):
 class TestPlan(BaseModel):
     suggestion: TestConfigSuggestion
     analysis: str
+
+def get_snapshot_files(snapshot_path: str) -> list[str]:
+    """从快照清单中取得测试计划需要的文件路径"""
+    manifest = read_snapshot_manifest(snapshot_path)
+
+    return [
+        snapshot.path
+        for snapshot in manifest.files
+    ]
 
 def generate_test_plan(snapshots_files: list[str], target_path: str="") -> TestPlan | None:
     try:
@@ -59,16 +69,14 @@ def generate_test_plan(snapshots_files: list[str], target_path: str="") -> TestP
         raise SystemExit(1)
 
 @click.command()
-def plan() -> None:
+def plan():
     """查看/编辑测试方案"""
     # 读 .autotest/snapshot.json，提取文件列表
     try:
         cwd = os.getcwd()
         snapshots_path = os.path.join(cwd, ".autotest", "snapshot.json")
-        with open(snapshots_path, "r") as f:
-            snapshots = json.load(f)
-            snapshots_files = [s["path"] for s in snapshots]
-            result = generate_test_plan(snapshots_files)
-            return result
+        snapshots_files = get_snapshot_files(snapshots_path)
+        result = generate_test_plan(snapshots_files)
+        return result
     except Exception as e:
         click.echo(f"生成解析方案失败 {e}")
