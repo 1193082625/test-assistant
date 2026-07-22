@@ -12,9 +12,8 @@ from langsmith import traceable
 from pydantic import BaseModel
 
 from core.analyzers.snapshot import Snapshot
+from core.executors import select_executor
 from core.executors.base import TestResult
-from core.executors.pytest_executor import PytestExecutor
-from core.executors.vitest_executor import VitestExecutor
 from core.generators.test_generator import generate_tests_for_project
 
 
@@ -62,6 +61,7 @@ def detect_change_node(state: GraphStates) -> dict:
     # 写入 changed_files 和 messages
     return {
         "changed_files": changes,
+        # 同于确保检测到文件变化后，后面任何中间步骤失败，磁盘上的旧基线都保持不变，下一次运行仍能检测到这些变化。这与数据库事务“全部成功才提交”的思想相似。
         "pending_snapshots": new_snapshots,
         "messages": "增量检查修改内容"
     }
@@ -110,10 +110,38 @@ def run_affected_node(state: GraphStates):
 
     project_path = state["project_info"].project_path
     all_results = []
-    if "vitest" in test_frameworks:
-        executor = VitestExecutor(cwd=project_path)
-    elif "pytest" in test_frameworks:
-        executor = PytestExecutor(cwd=project_path)
+    selection = None
+    unsupported_reasons = []
+    for framework in test_frameworks:
+        candidate = select_executor(
+            framework=framework,
+            cwd=project_path,
+        )
+
+        if candidate.supported:
+            selection = candidate
+            break
+
+        unsupported_reasons.append(candidate.reason)
+
+    if selection is None:
+        reason = "; ".join(unsupported_reasons)
+
+        return {
+            "messages": f"⚠ {reason}",
+            "test_results_by_file": {},
+            "errors": [reason],
+        }
+
+    executor = selection.executor
+    if executor is None:
+        reason = "执行器选择结果无效：supported=True 但 executor 为空"
+
+        return {
+            "messages": f"⚠ {reason}",
+            "test_results_by_file": {},
+            "errors": [reason],
+        }
 
     test_results_by_file = {}
     test_cases_dir = os.path.join(project_path, ".autotest", "test_cases")

@@ -9,7 +9,7 @@ from core.analyzers.snapshot import (
     compare_snapshots
 )
 
-from core.graphs.run_graph import ProjectInfo, detect_change_node, commit_snapshot_node, router
+from core.graphs.run_graph import ProjectInfo, detect_change_node, commit_snapshot_node, router, run_affected_node
 
 
 def test_detect_change_reads_versioned_snapshot_manifest(tmp_path):
@@ -187,3 +187,64 @@ def test_detect_commit_detect_returns_no_changes(tmp_path):
         "modified": [],
     }
 
+def test_run_affected_returns_explainable_unsupported_framework(tmp_path):
+    test_cases_path = (
+        tmp_path / ".autotest" / "test_cases"
+    )
+
+    # parents=True 表示父目录不存在时一起创建
+    test_cases_path.mkdir(parents=True)
+
+    (test_cases_path / "demo.test.js").write_text(
+        "test('demo', () => {})",
+        encoding="utf-8",
+    )
+
+    state = {
+        "changed_files": {
+            "added": ["src/app.js"],
+            "deleted": [],
+            "modified": [],
+        },
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "test_frameworks": ["jest"]
+                }
+            }
+        ),
+    }
+
+    result = run_affected_node(state)
+
+    assert result == {
+        "messages": "⚠ 不支持的测试框架: jest",
+        "test_results_by_file": {},
+        "errors": ["不支持的测试框架: jest"],
+    }
+
+def test_run_affected_selects_first_supported_framework(tmp_path):
+    state = {
+        "changed_files": {
+            "added": ["src/app.js"],
+            "deleted": [],
+            "modified": [],
+        },
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "test_frameworks": ["jest", "pytest"]
+                }
+            }
+        )
+    }
+
+    result = run_affected_node(state)
+
+    assert result == {
+        "messages": "执行结果： 0 passed, 0 failed",
+        "test_results_by_file": {},
+        "errors": [],
+    }
