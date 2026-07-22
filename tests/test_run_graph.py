@@ -140,3 +140,50 @@ def test_router_commits_only_successful_runs():
     assert router(successful_state) == "commit"
     assert router(retryable_failure_state) == "retry"
     assert router(exhausted_failure_state) == "end"
+
+def test_detect_commit_detect_returns_no_changes(tmp_path):
+    """闭环验收测试。测试快照提交后再次检测得到空变更"""
+    app_path = tmp_path / "app.py"
+    app_path.write_text("value = 1", encoding="utf-8")
+
+    autotest_path = tmp_path / ".autotest"
+    autotest_path.mkdir()
+
+    snapshot_path = autotest_path / "snapshot.json"
+
+    # 模拟首次运行前的空基线
+    commit_snapshot_manifest(
+        str(snapshot_path),
+        [],
+    )
+
+    project_info = ProjectInfo(
+        project_path=str(tmp_path),
+        config={}
+    )
+
+    first_result = detect_change_node({
+        "project_info": project_info,
+    })
+
+    assert first_result["changed_files"] == {
+        "added": ["app.py"],
+        "deleted": [],
+        "modified": [],
+    }
+
+    commit_snapshot_node({
+        "project_info": project_info,
+        "pending_snapshots": first_result["pending_snapshots"],
+    })
+
+    second_result = detect_change_node({
+        "project_info": project_info,
+    })
+
+    assert second_result["changed_files"] == {
+        "added": [],
+        "deleted": [],
+        "modified": [],
+    }
+

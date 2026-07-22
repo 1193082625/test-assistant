@@ -185,6 +185,7 @@ def run_graph(target_path: str):
     graph_builder.add_node("detect_change_node", detect_change_node)
     graph_builder.add_node("generate_tests_node", generate_tests_node)
     graph_builder.add_node("run_affected_node", run_affected_node)
+    graph_builder.add_edge("commit_snapshot_node", commit_snapshot_node)
     graph_builder.add_node("learn_node", learn_node)
 
     # 设置入口节点
@@ -193,11 +194,16 @@ def run_graph(target_path: str):
     # 添加边
     graph_builder.add_edge("detect_change_node", "generate_tests_node")
     graph_builder.add_edge("generate_tests_node", "run_affected_node")
-    graph_builder.add_conditional_edges("run_affected_node", router, {
-        "retry": "learn_node",
-        "pass": END
-    })
+    graph_builder.add_conditional_edges("run_affected_node",
+        router,
+{
+            "commit": "commit_snapshot_node",
+            "retry": "learn_node",
+            "end": END
+        }
+    )
     graph_builder.add_edge("learn_node", "detect_change_node")
+    graph_builder.add_edge("commit_snapshot_node", END)
 
     app = graph_builder.compile()
     # invoke 需要传入初始状态
