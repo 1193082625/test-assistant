@@ -13,7 +13,8 @@ from core.analyzers.snapshot import (
     SnapshotManifest,
     SNAPSHOT_FORMAT_VERSION,
     read_snapshot_manifest,
-    compare_snapshots
+    compare_snapshots,
+    commit_snapshot_manifest,
 )
 
 
@@ -208,4 +209,36 @@ def test_compare_snapshots_classifies_and_sorts_changes():
         "modified": [
             "src/modified.py",
         ]
+    }
+
+def test_commit_snapshot_makes_next_comparison_empty(tmp_path):
+    """测试只有流程成功后，才更新 snapshot.json 基线"""
+    snapshot_path = tmp_path / "snapshot.json"
+
+    current_snapshots = [
+        Snapshot(
+            path="src/app.py",
+            hash="new-hash",
+            size=10,
+            mtime=123.0,
+            type=".py"
+        ),
+    ]
+
+    committed_path = commit_snapshot_manifest(
+        str(snapshot_path),
+        current_snapshots
+    )
+
+    committed_manifest = read_snapshot_manifest(committed_path)
+    changes = compare_snapshots(
+        committed_manifest.files,
+        current_snapshots
+    )
+
+    assert committed_path == str(snapshot_path)
+    assert changes == {
+        "added": [],
+        "deleted": [],
+        "modified": [],
     }

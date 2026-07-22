@@ -2,6 +2,7 @@
 快照核心模块
 """
 import json
+import tempfile
 from dataclasses import dataclass, field
 import hashlib
 import os
@@ -195,6 +196,46 @@ def compare_snapshots(
         "deleted": deleted,
         "modified": modified,
     }
+
+def commit_snapshot_manifest(snapshot_path: str, snapshots: list[Snapshot]) -> str:
+    """原子写入快照基线"""
+    target_path = Path(snapshot_path)
+    manifest = SnapshotManifest(files=snapshots)
+    temporary_path = None
+
+    try:
+        # 创建临时文件，完整写入并刷新磁盘，再使用 os.replace 一次性替换
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=target_path.parent,
+            prefix=f".{target_path.name}",
+            suffix=".tmp",
+            delete=False # 退出 with 后 不自动删除临时文件，后面还需要用它替换正式文件
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+
+            json.dump(
+                manifest.to_dict(),
+                temporary_file,
+                indent=4,
+                ensure_ascii=False,
+            )
+
+            # 把 Python 内存缓冲区的数据交给操作系统
+            temporary_file.flush()
+            # 要求操作系统把文件内容同步到磁盘。fileno() 返回底层文件描述符
+            os.fsync(temporary_file.fileno())
+
+        # 用临时文件替换目标文件。在同一文件系统中，这个替换是原子的：其他读取者看到的要么是完整旧文件，要么是完整的新文件，不会看到只写了一半的JSON
+        os.replace(temporary_path, target_path)
+        return str(target_path)
+
+    except Exception:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        # raise 后不带异常对象 表示把刚捕获的原异常继续抛出。
+        raise
 
 def take_snapshot(root_dir: str, excludes: list[str], max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> tuple[list[Snapshot], int]:
     snapshots = []
