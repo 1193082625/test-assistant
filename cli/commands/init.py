@@ -88,9 +88,10 @@ def write_snapshot_manifest(autotest_path: str, snapshots: list[Snapshot]) -> st
 
     return snapshots_path
 
-def write_config(autotest_path: str, project_config: FrameworkInfo, mode: str) -> str:
+def write_config(autotest_path: str, project_name: str, project_config: FrameworkInfo, mode: str) -> str:
     """生成并写入 config.yml，返回配置文件路径"""
     config = deepcopy(DEFAULT_CONFIG) # 深拷贝
+    config["project"]["name"] = project_name
     config["project"].update(project_config.to_config())
 
     # 识别目标项目是否为新项目

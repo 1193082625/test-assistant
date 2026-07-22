@@ -19,13 +19,16 @@ def test_write_config_serializes_enums_as_machine_strings(tmp_path):
 
     config_path = write_config(
         autotest_path=str(tmp_path),
+        project_name="demo",
         project_config=project,
         mode="auto"
     )
 
+
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    assert config["project"]["name"] == "demo"
     assert config["project"]["type"] == "backend"
     assert config["project"]["language"] == "python"
     assert config["project"]["test_frameworks"] == ["pytest"]
