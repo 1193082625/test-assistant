@@ -4,11 +4,10 @@ from copy import deepcopy
 
 import click
 import yaml
-import json
 
 from core.models import FrameworkInfo
 from core.analyzers.framework import EXCLUDE_DIRS, analyze_project
-from core.analyzers.snapshot import take_snapshot, Snapshot, SnapshotManifest
+from core.analyzers.snapshot import take_snapshot, Snapshot, SnapshotManifest, commit_snapshot_manifest
 
 from cli.commands.plan import generate_test_plan
 
@@ -80,13 +79,11 @@ def create_autotest_structure(target_path: str) -> dict:
 
 def write_snapshot_manifest(autotest_path: str, snapshots: list[Snapshot]) -> str:
     """将带版本的文件快照写入 snapshot.json"""
-    manifest = SnapshotManifest(files=snapshots)
     snapshots_path = os.path.join(autotest_path, "snapshot.json")
-
-    with open(snapshots_path, "w", encoding="utf-8") as f:
-        json.dump(manifest.to_dict(), f, indent=4, ensure_ascii=False)
-
-    return snapshots_path
+    return commit_snapshot_manifest(
+        snapshots_path,
+        snapshots,
+    )
 
 def write_config(autotest_path: str, project_name: str, project_config: FrameworkInfo, mode: str) -> str:
     """生成并写入 config.yml，返回配置文件路径"""

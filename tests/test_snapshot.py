@@ -242,3 +242,37 @@ def test_commit_snapshot_makes_next_comparison_empty(tmp_path):
         "deleted": [],
         "modified": [],
     }
+
+# monkeypatch 是 pytest 提供的测试工具，可以在测试期间临时替换对象；测试结束后会自动恢复
+# *args ： 接收任意数量的位置参数，收集所有位置参数，保存成元组
+# **kwargs：接收任意数量的关键字参数，收集所有关键字参数，保存成字典
+def test_commit_snapshot_failure_preserves_old_baseline(tmp_path, monkeypatch):
+    snapshot_path = tmp_path / "snapshot.json"
+
+    old_snapshots = [
+        Snapshot("app.py", "old-hash", 10, 1.0, ".py"),
+    ]
+    new_snapshots = [
+        Snapshot("app.py", "new-hash", 10, 2.0, ".py"),
+    ]
+
+    commit_snapshot_manifest(
+        str(snapshot_path),
+        old_snapshots
+    )
+    old_content = snapshot_path.read_text(encoding="utf-8")
+
+    def fail_json_dump(*args, **kwargs):
+        raise OSError("模拟磁盘写入失败")
+
+    monkeypatch.setattr("core.analyzers.snapshot.json.dump", fail_json_dump)
+
+    with pytest.raises(OSError, match="模拟磁盘写入失败"):
+        commit_snapshot_manifest(
+            str(snapshot_path),
+            new_snapshots
+        )
+
+    assert snapshot_path.read_text(encoding="utf-8") == old_content
+    # 验证失败后没有遗留临时文件
+    assert list(tmp_path.glob(".snapshot.json.*.tmp")) == []
