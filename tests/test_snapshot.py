@@ -12,7 +12,8 @@ from core.analyzers.snapshot import (
     Snapshot,
     SnapshotManifest,
     SNAPSHOT_FORMAT_VERSION,
-    read_snapshot_manifest
+    read_snapshot_manifest,
+    compare_snapshots
 )
 
 
@@ -176,3 +177,35 @@ def test_read_snapshot_manifest_from_file(tmp_path):
     assert manifest.version == SNAPSHOT_FORMAT_VERSION
     assert len(manifest.files) == 1
     assert manifest.files[0].path == "src/app.py"
+
+def test_compare_snapshots_classifies_and_sorts_changes():
+    old_snapshots = [
+        Snapshot("src/modified.py", "old-hash", 10, 1.0, ".py"),
+        Snapshot("src/z-deleted.py", "hash-z", 10, 1.0, ".py"),
+        Snapshot("src/a-deleted.py", "hash-a", 10, 1.0, ".py"),
+    ]
+
+    new_snapshots = [
+        Snapshot("src/modified.py", "new-hash", 10, 2.0, ".py"),
+        Snapshot("src/z-added.py", "hash-z", 10, 2.0, ".py"),
+        Snapshot("src/a-added.py", "hash-a", 10, 2.0, ".py"),
+    ]
+
+    changes = compare_snapshots(
+        old_snapshots,
+        new_snapshots
+    )
+
+    assert changes == {
+        "added": [
+            "src/a-added.py",
+            "src/z-added.py",
+        ],
+        "deleted": [
+            "src/a-deleted.py",
+            "src/z-deleted.py",
+        ],
+        "modified": [
+            "src/modified.py",
+        ]
+    }

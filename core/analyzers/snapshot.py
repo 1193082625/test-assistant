@@ -164,6 +164,38 @@ def read_snapshot_manifest(snapshot_path: str) -> SnapshotManifest:
 
     return SnapshotManifest.from_dict(data)
 
+def compare_snapshots(
+        old_snapshots: list[Snapshot],
+        new_snapshots: list[Snapshot],
+) -> dict[str, list[str]]:
+    """比较两组快照，返回稳定排序的文件变更"""
+    old_map = {
+        snapshot.path: snapshot.hash
+        for snapshot in old_snapshots
+    }
+
+    new_map = {
+        snapshot.path: snapshot.hash
+        for snapshot in new_snapshots
+    }
+
+    old_paths = set(old_map)
+    new_paths = set(new_map)
+
+    added = sorted(new_paths - old_paths)
+    deleted = sorted(old_paths - new_paths)
+    modified = sorted(
+        path
+        for path in old_paths & new_paths
+        if old_map[path] != new_map[path]
+    )
+
+    return {
+        "added": added,
+        "deleted": deleted,
+        "modified": modified,
+    }
+
 def take_snapshot(root_dir: str, excludes: list[str], max_file_size: int = DEFAULT_MAX_FILE_SIZE) -> tuple[list[Snapshot], int]:
     snapshots = []
     """
