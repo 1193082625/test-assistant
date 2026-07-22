@@ -11,6 +11,7 @@ from langgraph.graph import add_messages, StateGraph, END
 from langsmith import traceable
 from pydantic import BaseModel
 
+from core.analyzers.snapshot import Snapshot
 from core.executors.base import TestResult
 from core.executors.pytest_executor import PytestExecutor
 from core.executors.vitest_executor import VitestExecutor
@@ -31,6 +32,7 @@ class GraphStates(TypedDict):
     retry_count: int # 计数器
     max_retries: int # 最大重试次数
     generated_tests: list[str] # 通过 解析文件 生成的测试代码
+    pending_snapshots: list[Snapshot]
 
 # LangGraph 节点只接收一个参数 -- state，多出来的参数没法传进去
 @traceable(name="detect_change")
@@ -44,7 +46,7 @@ def detect_change_node(state: GraphStates) -> dict:
     target_path = state["project_info"].project_path
     snapshot_path = os.path.join(target_path, ".autotest", "snapshot.json")
     # 加载旧快照
-    from core.analyzers.snapshot import read_snapshot_manifest, take_snapshot, compare_snapshots
+    from core.analyzers.snapshot import (read_snapshot_manifest, take_snapshot, compare_snapshots)
     old_manifest = read_snapshot_manifest(snapshot_path)
 
     # 拍新快照（take_snapshot）
@@ -60,7 +62,23 @@ def detect_change_node(state: GraphStates) -> dict:
     # 写入 changed_files 和 messages
     return {
         "changed_files": changes,
+        "pending_snapshots": new_snapshots,
         "messages": "增量检查修改内容"
+    }
+
+@traceable(name="commit_snapshot")
+def commit_snapshot_node(state: GraphStates) -> dict:
+    """将待提交快照保存为新的比较基线"""
+    from core.analyzers.snapshot import commit_snapshot_manifest
+
+    target_path = state["project_info"].project_path
+    snapshot_path = os.path.join(target_path, ".autotest", "snapshot.json")
+
+    # 把旧基线替换为新基线
+    commit_snapshot_manifest(snapshot_path, state["pending_snapshots"])
+
+    return {
+        "messages": "✓ 快照基线已提交"
     }
 
 @traceable(name="run_affected")
@@ -153,12 +171,12 @@ def learn_node(state: GraphStates):
     pass
 
 def router(state: GraphStates):
-    """如果结果中有失败，则重新思考并修复"""
+    """根据执行结果决定提交、重试或结束"""
+    if not state["errors"]:
+        return "commit" # 超过上限，强制结束
     if state["retry_count"] >= state["max_retries"]:
-        return "pass" # 超过上限，强制结束
-    if state["errors"]:
-        return "retry"
-    return "pass"
+        return "end"
+    return "retry"
 
 def run_graph(target_path: str):
     """增量执行工作流"""
@@ -199,6 +217,7 @@ def run_graph(target_path: str):
         "changed_files": [],
         "retry_count": 0,
         "max_retries": 3,
-        "generated_tests": []
+        "generated_tests": [],
+        "pending_snapshots": []
     })
     return result
