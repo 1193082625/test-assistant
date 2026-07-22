@@ -36,16 +36,15 @@ class GraphStates(TypedDict):
 @traceable(name="detect_change")
 def detect_change_node(state: GraphStates) -> dict:
     """
-    检测文件变化
-    入： 读取文件快照，对比变更
-    出：messages += ["检测到 N 个文件变更：a.ts，b.ts"]
-    如果无变更： errors 保持空 -> 后续直接走 END
+    读取旧 manifest
+    获取新快照
+    调用 compare_snapshots
     """
     # 找到项目的 .autotest/snapshot.json
     target_path = state["project_info"].project_path
     snapshot_path = os.path.join(target_path, ".autotest", "snapshot.json")
     # 加载旧快照
-    from core.analyzers.snapshot import read_snapshot_manifest, take_snapshot
+    from core.analyzers.snapshot import read_snapshot_manifest, take_snapshot, compare_snapshots
     old_manifest = read_snapshot_manifest(snapshot_path)
 
     # 拍新快照（take_snapshot）
@@ -53,43 +52,14 @@ def detect_change_node(state: GraphStates) -> dict:
     from core.analyzers.framework import EXCLUDE_DIRS
     new_snapshots, _ = take_snapshot(target_path, EXCLUDE_DIRS)
 
-    """
-    对比 -> 找出 新增 / 修改 / 删除的文件
-    先转成字典，对比需要按 path 查找，list 不方便
-    注意：take_snapshot 返回的是 Snapshot 对象列表 （dataclass），取值用 .path 和 .hash
-    dict 用 ["path"] 和 ["hash"]
-    
-    old_paths = set(old_map.keys())
-    new_paths = set(new_map.keys())
-    
-    # 新增 = new_paths - old_paths
-    # 删除 = old_paths - new_paths
-    # 修改 = old_paths & new_paths and hash 不同
-    """
-    old_map = {
-        s.path: s.hash
-        for s in old_manifest.files
-    }
-    new_map = {item.path: item.hash for item in new_snapshots}
-
-    old_paths = set(old_map.keys())
-    new_paths = set(new_map.keys())
-
-    created_paths = new_paths - old_paths
-    deleted_paths = old_paths - new_paths
-    same_paths = (old_paths & new_paths)
-    modified_paths = []
-    for path in same_paths:
-        if old_map[path] != new_map[path]:
-            modified_paths.append(path)
+    changes = compare_snapshots(
+        old_manifest.files,
+        new_snapshots
+    )
 
     # 写入 changed_files 和 messages
     return {
-        "changed_files": {
-            "added": list(created_paths),
-            "deleted": list(deleted_paths),
-            "modified": modified_paths,
-        },
+        "changed_files": changes,
         "messages": "增量检查修改内容"
     }
 
