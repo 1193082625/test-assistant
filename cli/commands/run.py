@@ -195,13 +195,22 @@ def run(path):
             click.echo(f"- {f} (modified)")
 
     # 执行结果
-    test_result = result["test_results_by_file"]
-    if test_result:
+    execution_reports = result["execution_reports_by_file"]
+
+    if execution_reports:
         click.echo("→ 执行受影响测试...")
-        for file_path, results in test_result.items():
-            passed = sum(1 for r in results if r.status == "passed")
-            failed = sum(1 for r in results if r.status == "failed")
-            click.echo(f"  ✓ {file_path} ({passed} passed, {failed} failed)")
+
+        for file_path, report in execution_reports.items():
+            results = report.test_results
+
+            passed = sum(1 for test_result in results if test_result.status == "passed")
+            failed = sum(1 for test_result in results if test_result.status == "failed")
+
+            click.echo(
+                f"  ✓ {file_path} "
+                f"({passed} passed, {failed} failed)"
+            )
+
 
     # 汇总
     msg = result["messages"][-1]

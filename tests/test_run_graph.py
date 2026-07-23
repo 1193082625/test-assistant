@@ -8,6 +8,8 @@ from core.analyzers.snapshot import (
     commit_snapshot_manifest,
     compare_snapshots
 )
+from core.executors import PytestExecutor
+from core.executors.base import ExecutionReport, TestResult as ExecutionTestResult
 
 from core.graphs.run_graph import ProjectInfo, detect_change_node, commit_snapshot_node, router, run_affected_node
 
@@ -220,7 +222,7 @@ def test_run_affected_returns_explainable_unsupported_framework(tmp_path):
 
     assert result == {
         "messages": "⚠ 不支持的测试框架: jest",
-        "test_results_by_file": {},
+        "execution_reports_by_file": {},
         "errors": ["不支持的测试框架: jest"],
     }
 
@@ -244,7 +246,113 @@ def test_run_affected_selects_first_supported_framework(tmp_path):
     result = run_affected_node(state)
 
     assert result == {
-        "messages": "执行结果： 0 passed, 0 failed",
-        "test_results_by_file": {},
+        "messages": "执行结果：0 passed, 0 failed, 0 execution errors",
+        "execution_reports_by_file": {},
         "errors": [],
     }
+
+def test_run_affected_consumes_execution_report(tmp_path, monkeypatch):
+    """Graph 不仅要保存单条用例结果，还要保存每个文件的完整执行报告，包括退出码喝原始输出"""
+    test_cases_path = (
+        tmp_path / ".autotest" / "test_cases"
+    )
+    test_cases_path.mkdir(parents=True)
+
+    test_file = test_cases_path / "test_demo.py"
+    test_file.write_text(
+        "def test_demo(): assert False",
+        encoding="utf-8",
+    )
+
+    def fake_execute(self, file_path):
+        return ExecutionReport(
+            test_results = [
+                ExecutionTestResult(
+                    name="test_demo",
+                    status="failed",
+                    duration=0.01,
+                    message="assert False",
+                )
+            ],
+            stdout="test_demo.py::test_demo FAILED",
+            stderr="",
+            exit_code=1,
+            error_type="test_failure",
+        )
+
+    monkeypatch.setattr(PytestExecutor, "execute", fake_execute)
+
+    state = {
+        "changed_files": {
+            "added": ["src/app.py"],
+            "deleted": [],
+            "modified": [],
+        },
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "test_frameworks": ["pytest"]
+                }
+            }
+        )
+    }
+
+    result = run_affected_node(state)
+
+    report = result["execution_reports_by_file"][str(test_file)]
+
+    assert report.exit_code == 1
+    assert report.stdout == "test_demo.py::test_demo FAILED"
+    assert result["errors"] == ["test_demo failed"]
+
+def test_run_affected_propagates_runner_error(tmp_path, monkeypatch):
+    """测试 Runner 错误必须进入 Graph 的 errors , 不能显示成单纯的 0 failed"""
+    test_cases_path = (tmp_path / ".autotest" / "test_cases")
+    test_cases_path.mkdir(parents=True)
+
+    test_file = test_cases_path / "test_demo.py"
+    test_file.write_text(
+        "def test_demo(): pass",
+        encoding="utf-8",
+    )
+
+    def fake_execute(self, file_path):
+        return ExecutionReport(
+            test_results = [],
+            stdout="",
+            stderr="ERROR: test file not found",
+            exit_code=4,
+            error_type="runner_error",
+        )
+
+    monkeypatch.setattr(PytestExecutor, "execute", fake_execute)
+
+    state = {
+        "changed_files": {
+            "added": ["src/app.py"],
+            "deleted": [],
+            "modified": [],
+        },
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "test_frameworks": ["pytest"]
+                }
+            }
+        )
+    }
+
+    result = run_affected_node(state)
+
+    assert result["errors"] == [
+        (
+            "test_demo.py: runner_error: "
+            "ERROR: test file not found"
+         )
+    ]
+    assert result["messages"] == (
+        "执行结果：0 passed, 0 failed, "
+        "1 execution errors"
+    )

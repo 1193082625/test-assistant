@@ -13,16 +13,39 @@ class PytestExecutor(BaseExecutor):
         return file_path.endswith(".py") and ("test_" in file_path or "_test" in file_path)
 
     def execute(self, file_path: str) -> ExecutionReport:
-        # 用 subprocess 跑 pytest，只输出简洁结果
-        result = subprocess.run(
-            ["python", "-m", "pytest", file_path, "-v", "--tb=short"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=self.cwd,
-        )
+        try:
+            # 用 subprocess 跑 pytest，只输出简洁结果
+            result = subprocess.run(
+                ["python", "-m", "pytest", file_path, "-v", "--tb=short"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=self.cwd,
+            )
+        # 超时必须放在正常报告之外，因为它没有可靠的进程退出码
+        except subprocess.TimeoutExpired as error:
+            return ExecutionReport(
+                test_results=[],
+                stdout=str(error.stdout) or "",
+                stderr=error.stderr or str(error),
+                exit_code=None,
+                timed_out=True,
+                error_type="timeout",
+            )
+        # FileNotFoundError 是 OSError 的子类。除了命令不存在，工作目录不存在、权限不足等启动层错误也通常属于 OSError
+        except OSError as error:
+            return ExecutionReport(
+                test_results=[],
+                stdout="",
+                stderr=str(error),
+                exit_code=None,
+                error_type="startup_error",
+            )
+
         # 解析出的每一条测试用例结果
         test_results = self._parse_output(result.stdout, result.returncode)
+
+        error_type = None
 
         # error_type 表示整个 pytest 命令是否正常完成
         if result.returncode == 1:

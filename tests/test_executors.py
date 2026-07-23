@@ -1,7 +1,7 @@
 import subprocess
 
 from core.executors import select_executor, VitestExecutor
-from core.executors.base import ExecutionReport, BaseExecutor, TestResult
+from core.executors.base import ExecutionReport, BaseExecutor, TestResult as ExecutionTestResult
 from core.executors.pytest_executor import PytestExecutor
 
 def test_select_executor_returns_pytest_executor():
@@ -80,4 +80,119 @@ def test_pytest_executor_reports_runner_failure(monkeypatch):
     assert report.stderr == "ERROR: test file not found"
     assert report.exit_code == 4
     assert report.error_type == "runner_error"
+    assert report.successful is False
+
+def test_pytest_executor_reports_startup_error(monkeypatch):
+    """测试 Runner 启动失败"""
+    def fail_run(*args, **kwargs):
+        raise FileNotFoundError("python executable not found")
+
+    monkeypatch.setattr("core.executors.pytest_executor.subprocess.run", fail_run)
+
+    executor = PytestExecutor(cwd="/demo")
+    report = executor.execute("test_demo.py")
+
+    assert report.test_results == []
+    assert report.exit_code is None
+    assert report.error_type == "startup_error"
+    assert report.stderr == "python executable not found"
+    assert report.successful is False
+
+def test_pytest_executor_reports_timeout(monkeypatch):
+    def timeout_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=args[0],
+            timeout=120,
+            output="partial output",
+            stderr="pytest timed out"
+        )
+
+    monkeypatch.setattr("core.executors.pytest_executor.subprocess.run", timeout_run)
+
+    executor = PytestExecutor(cwd="/demo")
+    report = executor.execute("test_slow.py")
+
+    assert report.test_results == []
+    assert report.stdout == "partial output"
+    assert report.stderr == "pytest timed out"
+    assert report.exit_code is None
+    assert report.timed_out is True
+    assert report.error_type == "timeout"
+    assert report.successful is False
+
+def test_vitest_executor_reports_runner_failure(monkeypatch):
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=2,
+            stdout="",
+            stderr="vitest configuration error",
+        )
+    monkeypatch.setattr("core.executors.vitest_executor.subprocess.run", fake_run)
+
+    executor = VitestExecutor(cwd="/frontend")
+    report = executor.execute("demo.test.ts")
+
+    assert report.test_results == []
+    assert report.stdout == ""
+    assert report.stderr == "vitest configuration error"
+    assert report.exit_code == 2
+    assert report.error_type == "runner_error"
+    assert report.successful is False
+
+def test_vitest_executor_reports_startup_error(monkeypatch):
+    def fail_run(*args, **kwargs):
+        raise FileNotFoundError("npx executable not found")
+    monkeypatch.setattr("core.executors.vitest_executor.subprocess.run", fail_run)
+    executor = VitestExecutor(cwd="/frontend")
+    report = executor.execute("demo.test.ts")
+    assert report.test_results == []
+    assert report.stdout == ""
+    # 如果系统没有安装 Node.js/npm , npx 不存在。subprocess.run() 会抛出 FileNotFoundError
+    assert report.stderr == "npx executable not found"
+    assert report.exit_code is None
+    assert report.error_type == "startup_error"
+    assert report.successful is False
+
+def test_vitest_executor_reports_timeout_without_output(monkeypatch):
+    def timeout_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=args[0],
+            timeout=120,
+            output=None,
+            stderr=None
+        )
+
+    monkeypatch.setattr("core.executors.vitest_executor.subprocess.run", timeout_run)
+
+    executor = VitestExecutor(cwd="/frontend")
+    report = executor.execute("slow.test.ts")
+
+    assert report.test_results == []
+    assert report.stdout == ""
+    assert "timed out" in report.stderr
+    assert report.exit_code is None
+    assert report.timed_out is True
+    assert report.error_type == "timeout"
+    assert report.successful is False
+
+def test_vitest_executor_reports_parse_error(monkeypatch):
+    """Runner 可能正常退出或产生 stdout，但输出不是预期JSON，这种情况不能让异常直接冲出执行器"""
+    def fake_run(*args, **kwargs):
+        # CompletedProcess 是普通返回结果对象，不是异常类，因此不能使用 raise.
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout="this is not json",
+            stderr="",
+        )
+
+    monkeypatch.setattr("core.executors.vitest_executor.subprocess.run", fake_run)
+    executor = VitestExecutor(cwd="/frontend")
+    report = executor.execute("demo.test.ts")
+    assert report.test_results == []
+    assert report.stdout == "this is not json"
+    assert report.exit_code == 0
+    assert report.error_type == "parse_error"
+    assert "解析失败" in report.stderr
     assert report.successful is False

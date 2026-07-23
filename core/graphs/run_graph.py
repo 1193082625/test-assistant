@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from core.analyzers.snapshot import Snapshot
 from core.executors import select_executor
-from core.executors.base import TestResult
+from core.executors.base import ExecutionReport
 from core.generators.test_generator import generate_tests_for_project
 
 
@@ -27,7 +27,7 @@ class GraphStates(TypedDict):
     errors: list[str]
     project_info: ProjectInfo
     changed_files: dict # detect的输出 -> run 的输入
-    test_results_by_file: list[TestResult]
+    execution_reports_by_file: dict[str, ExecutionReport]
     retry_count: int # 计数器
     max_retries: int # 最大重试次数
     generated_tests: list[str] # 通过 解析文件 生成的测试代码
@@ -96,7 +96,7 @@ def run_affected_node(state: GraphStates):
     if not any(changed_files.values()):
         return {
             "messages": "✓ 文件无变更，跳过测试执行",
-            "test_results_by_file": {},
+            "execution_reports_by_file": {},
             "errors": [],
         }
 
@@ -104,12 +104,13 @@ def run_affected_node(state: GraphStates):
     if not test_frameworks:
         return {
             "messages": "⚠ 未检测到测试框架，跳过执行",
-            "test_results_by_file": {},
+            "execution_reports_by_file": {},
             "errors": [],
         }
 
     project_path = state["project_info"].project_path
     all_results = []
+    execution_errors = []
     selection = None
     unsupported_reasons = []
     for framework in test_frameworks:
@@ -129,7 +130,7 @@ def run_affected_node(state: GraphStates):
 
         return {
             "messages": f"⚠ {reason}",
-            "test_results_by_file": {},
+            "execution_reports_by_file": {},
             "errors": [reason],
         }
 
@@ -139,11 +140,11 @@ def run_affected_node(state: GraphStates):
 
         return {
             "messages": f"⚠ {reason}",
-            "test_results_by_file": {},
+            "execution_reports_by_file": {},
             "errors": [reason],
         }
 
-    test_results_by_file = {}
+    execution_reports_by_file = {}
     test_cases_dir = os.path.join(project_path, ".autotest", "test_cases")
     if os.path.isdir(test_cases_dir):
         for root, dirs, files in os.walk(test_cases_dir):
@@ -151,9 +152,22 @@ def run_affected_node(state: GraphStates):
                 file_path = os.path.join(root, file)
                 if executor.can_handle(file_path):
                     print(f"  → 执行测试: {os.path.basename(file_path)}...", end="", flush=True)
-                    results = list(executor.execute(file_path)) # 执行单个文件
-                    all_results.extend(results)
-                    test_results_by_file[file_path] = results # 按文件记录
+                    report = executor.execute(file_path)
+                    all_results.extend(report.test_results)
+                    execution_reports_by_file[file_path] = report
+
+                    # 普通测试断言失败会在下面通过具体的 TestResult 收集，所以这里排除 test_failure
+                    if (report.error_type is not None) and (report.error_type != "test_failure"):
+                        detail = (
+                            report.stderr
+                            or report.stdout
+                            or "未知执行错误"
+                        )
+
+                        execution_errors.append(
+                            f"{os.path.basename(file_path)}: "
+                            f"{report.error_type}: {detail}"
+                        )
 
     # 统计
     passed = sum(1 for r in all_results if r.status == "passed")
@@ -161,10 +175,16 @@ def run_affected_node(state: GraphStates):
 
     failed_errors = [f"{r.name} failed" for r in failed]
 
+    errors = failed_errors + execution_errors
+
     return {
-        "messages": f"执行结果： {passed} passed, {len(failed)} failed",
-        "test_results_by_file": test_results_by_file,
-        "errors": failed_errors,
+        "messages":(
+            f"执行结果：{passed} passed, "
+            f"{len(failed)} failed, "
+            f"{len(execution_errors)} execution errors"
+        ),
+        "execution_reports_by_file": execution_reports_by_file,
+        "errors": errors,
     }
 
 @traceable(name="generate_tests")
@@ -247,7 +267,7 @@ def run_graph(target_path: str):
             project_path=target_path,
             config=config
         ),
-        "test_results_by_file": [],
+        "execution_reports_by_file": {},
         "changed_files": [],
         "retry_count": 0,
         "max_retries": 3,
