@@ -2,7 +2,7 @@
 import subprocess
 import re
 
-from core.executors.base import BaseExecutor, TestResult, ExecutionReport
+from core.executors.base import BaseExecutor, TestResult, ExecutionReport, normalize_process_output
 
 
 class PytestExecutor(BaseExecutor):
@@ -26,8 +26,8 @@ class PytestExecutor(BaseExecutor):
         except subprocess.TimeoutExpired as error:
             return ExecutionReport(
                 test_results=[],
-                stdout=str(error.stdout) or "",
-                stderr=error.stderr or str(error),
+                stdout=normalize_process_output(error.stdout),
+                stderr=normalize_process_output(error.stderr) or str(error),
                 exit_code=None,
                 timed_out=True,
                 error_type="timeout",

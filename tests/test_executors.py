@@ -103,8 +103,8 @@ def test_pytest_executor_reports_timeout(monkeypatch):
         raise subprocess.TimeoutExpired(
             cmd=args[0],
             timeout=120,
-            output="partial output",
-            stderr="pytest timed out"
+            output=b"partial output", # b"" 表示字节数据，类型是 bytes
+            stderr=b"pytest timed out"
         )
 
     monkeypatch.setattr("core.executors.pytest_executor.subprocess.run", timeout_run)

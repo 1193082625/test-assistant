@@ -30,6 +30,16 @@ class ExecutionReport:
             and self.error_type is None
         )
 
+def normalize_process_output(output: str | bytes | None) -> str:
+    """将子进程输出统一转换为字符串"""
+    if output is None:
+        return ""
+
+    if isinstance(output, bytes):
+        # errors="replace" 表示在遇到无法按 UTF-8 解码的字节时，用替代字符 � 表示，而不是让错误处理流程再次抛出UnicodeDecodeError
+        return output.decode("utf-8", errors="replace")
+
+    return output
 
 class BaseExecutor(ABC):
     """执行器抽象基类"""
