@@ -28,8 +28,6 @@ class GraphStates(TypedDict):
     project_info: ProjectInfo
     changed_files: dict # detect的输出 -> run 的输入
     execution_reports_by_file: dict[str, ExecutionReport]
-    retry_count: int # 计数器
-    max_retries: int # 最大重试次数
     generated_tests: list[str] # 通过 解析文件 生成的测试代码
     pending_snapshots: list[Snapshot]
 
@@ -205,26 +203,12 @@ def generate_tests_node(state: GraphStates) -> dict:
 
     return {"generated_tests": generated, "messages": msg}
 
-@traceable(name="learn")
-def learn_node(state: GraphStates):
-    """
-    入：取 errors[0] 分析失败原因，尝试修复
-    出：
-        errors.pop(0)
-        retry_count += 1
-        完成后回到 detect_change_node
-    """
-
-    # return {"retry_count": state["retry_count"]+1}
-    pass
-
 def router(state: GraphStates):
     """根据执行结果决定提交、重试或结束"""
-    if not state["errors"]:
-        return "commit" # 超过上限，强制结束
-    if state["retry_count"] >= state["max_retries"]:
+    if state["errors"]:
         return "end"
-    return "retry"
+
+    return "commit"
 
 def run_graph(target_path: str):
     """增量执行工作流"""
@@ -233,8 +217,7 @@ def run_graph(target_path: str):
     graph_builder.add_node("detect_change_node", detect_change_node)
     graph_builder.add_node("generate_tests_node", generate_tests_node)
     graph_builder.add_node("run_affected_node", run_affected_node)
-    graph_builder.add_edge("commit_snapshot_node", commit_snapshot_node)
-    graph_builder.add_node("learn_node", learn_node)
+    graph_builder.add_node("commit_snapshot_node", commit_snapshot_node)
 
     # 设置入口节点
     graph_builder.set_entry_point("detect_change_node")
@@ -242,15 +225,14 @@ def run_graph(target_path: str):
     # 添加边
     graph_builder.add_edge("detect_change_node", "generate_tests_node")
     graph_builder.add_edge("generate_tests_node", "run_affected_node")
-    graph_builder.add_conditional_edges("run_affected_node",
+    graph_builder.add_conditional_edges(
+        "run_affected_node",
         router,
 {
             "commit": "commit_snapshot_node",
-            "retry": "learn_node",
             "end": END
         }
     )
-    graph_builder.add_edge("learn_node", "detect_change_node")
     graph_builder.add_edge("commit_snapshot_node", END)
 
     app = graph_builder.compile()
@@ -269,8 +251,6 @@ def run_graph(target_path: str):
         ),
         "execution_reports_by_file": {},
         "changed_files": [],
-        "retry_count": 0,
-        "max_retries": 3,
         "generated_tests": [],
         "pending_snapshots": []
     })

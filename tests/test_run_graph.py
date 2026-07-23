@@ -11,7 +11,8 @@ from core.analyzers.snapshot import (
 from core.executors import PytestExecutor
 from core.executors.base import ExecutionReport, TestResult as ExecutionTestResult
 
-from core.graphs.run_graph import ProjectInfo, detect_change_node, commit_snapshot_node, router, run_affected_node
+from core.graphs.run_graph import ProjectInfo, detect_change_node, commit_snapshot_node, router, run_affected_node, \
+    run_graph
 
 
 def test_detect_change_reads_versioned_snapshot_manifest(tmp_path):
@@ -123,25 +124,14 @@ def test_router_commits_only_successful_runs():
     """测试路由决策，保证只有成功流程才能进入 commit"""
     successful_state = {
         "errors": [],
-        "retry_count": 0,
-        "max_retries": 3
     }
 
-    retryable_failure_state = {
-        "errors": ["测试失败"],
-        "retry_count": 1,
-        "max_retries": 3
-    }
-
-    exhausted_failure_state = {
+    failure_state = {
         "errors": ["测试仍然失败"],
-        "retry_count": 3,
-        "max_retries": 3
     }
 
     assert router(successful_state) == "commit"
-    assert router(retryable_failure_state) == "retry"
-    assert router(exhausted_failure_state) == "end"
+    assert router(failure_state) == "end"
 
 def test_detect_commit_detect_returns_no_changes(tmp_path):
     """闭环验收测试。测试快照提交后再次检测得到空变更"""
@@ -356,3 +346,113 @@ def test_run_affected_propagates_runner_error(tmp_path, monkeypatch):
         "执行结果：0 passed, 0 failed, "
         "1 execution errors"
     )
+
+def test_run_graph_failure_does_not_commit_snapshot(tmp_path, monkeypatch):
+    app_path = (tmp_path / "app.py")
+    app_path.write_text("value = 1", encoding="utf-8")
+
+    old_snapshots, skipped = take_snapshot(
+        str(tmp_path),
+        excludes=[".autotest"],
+    )
+
+    assert skipped == 0
+
+    autotest_path = tmp_path / ".autotest"
+    test_cases_path = autotest_path / "test_cases"
+    test_cases_path.mkdir(parents=True)
+
+    snapshot_path = autotest_path / "snapshot.json"
+    commit_snapshot_manifest(
+        str(snapshot_path),
+        old_snapshots,
+    )
+
+    (autotest_path / "config.yml").write_text(
+        (
+            "project:\n"
+            "  test_frameworks:\n"
+            "    - pytest\n"
+        ),
+        encoding="utf-8",
+    )
+
+    (test_cases_path / "test_demo.py").write_text(
+        "def test_demo(): pass",
+        encoding="utf-8",
+    )
+
+    # 建立旧基线后修改项目文件
+    app_path.write_text("value = 2", encoding="utf-8")
+
+    def fake_generate(*args, **kwargs):
+        return []
+
+    def fake_execute(self, file_path):
+        return ExecutionReport(
+            test_results = [],
+            stdout="",
+            stderr="pytest startup failed",
+            exit_code=None,
+            error_type="startup_error",
+        )
+
+    monkeypatch.setattr("core.graphs.run_graph.generate_tests_for_project", fake_generate)
+    monkeypatch.setattr(PytestExecutor, "execute", fake_execute)
+
+    result = run_graph(str(tmp_path))
+
+    stored_manifest = read_snapshot_manifest(str(snapshot_path))
+
+    current_snapshots, _ = take_snapshot(
+        str(tmp_path),
+        excludes=[".autotest"],
+    )
+
+    remaining_changes = compare_snapshots(stored_manifest.files, current_snapshots)
+
+    assert result["errors"] == [
+        (
+            "test_demo.py: startup_error: "
+            "pytest startup failed"
+        )
+    ]
+    assert remaining_changes["modified"] == ["app.py"]
+
+def test_run_graph_success_reaches_commit_once(tmp_path, monkeypatch):
+    app_path = (tmp_path / "app.py")
+    app_path.write_text("value = 1", encoding="utf-8")
+
+    snapshots, skipped = take_snapshot(str(tmp_path), excludes=[".autotest"])
+    assert skipped == 0
+
+    autotest_path = tmp_path / ".autotest"
+    autotest_path.mkdir()
+
+    commit_snapshot_manifest(str(autotest_path / "snapshot.json"), snapshots)
+    (autotest_path / "config.yml").write_text(
+        (
+            "project:\n"
+            "  test_frameworks: []\n"
+        ),
+        encoding="utf-8",
+    )
+
+    commit_calls = []
+
+    def fake_commit(state):
+        commit_calls.append(state["pending_snapshots"])
+        return {
+            "messages": "✓ 快照基线已提交",
+        }
+
+    monkeypatch.setattr("core.graphs.run_graph.commit_snapshot_node", fake_commit)
+
+    result = run_graph(str(tmp_path))
+
+    assert result["errors"] == []
+    assert len(commit_calls) == 1
+    assert [
+        snapshot.path
+        for snapshot in commit_calls[0]
+    ] == ["app.py"]
