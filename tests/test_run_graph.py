@@ -433,13 +433,26 @@ def test_run_graph_success_reaches_commit_once(tmp_path, monkeypatch):
     (autotest_path / "config.yml").write_text(
         (
             "project:\n"
-            "  test_frameworks: []\n"
+            "  test_frameworks:\n"
+            "    - pytest\n"
         ),
         encoding="utf-8",
     )
 
-    commit_calls = []
+    test_cases_path = autotest_path / "test_cases"
+    test_cases_path.mkdir()
 
+    (test_cases_path / "test_demo.py").write_text(
+        "def test_demo(): pass",
+        encoding="utf-8",
+    )
+    def forbidden_generate(*args, **kwargs):
+        raise AssertionError("无文件变化时不应调用测试生成器")
+
+    def forbidden_execute(self, file_path):
+        raise AssertionError("无文件变化时不应调用测试执行器")
+
+    commit_calls = []
     def fake_commit(state):
         commit_calls.append(state["pending_snapshots"])
         return {
@@ -447,12 +460,14 @@ def test_run_graph_success_reaches_commit_once(tmp_path, monkeypatch):
         }
 
     monkeypatch.setattr("core.graphs.run_graph.commit_snapshot_node", fake_commit)
+    monkeypatch.setattr("core.graphs.run_graph.generate_tests_for_project", forbidden_generate)
+    monkeypatch.setattr(PytestExecutor, "execute", forbidden_execute)
 
     result = run_graph(str(tmp_path))
 
     assert result["errors"] == []
     assert len(commit_calls) == 1
     assert [
-        snapshot.path
-        for snapshot in commit_calls[0]
-    ] == ["app.py"]
+               snapshot.path
+               for snapshot in commit_calls[0]
+           ] == ["app.py"]

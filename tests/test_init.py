@@ -2,7 +2,10 @@
 import json
 import yaml
 from pathlib import Path
-from cli.commands.init import write_config, write_snapshot_manifest
+
+from click.testing import CliRunner
+
+from cli.commands.init import write_config, write_snapshot_manifest, init as init_command
 from cli.commands.plan import get_snapshot_files
 from core.analyzers.snapshot import Snapshot
 from core.models import ProjectType, Language, FrameworkInfo
@@ -91,3 +94,39 @@ def test_get_snapshot_files_reads_versioned_manifest(tmp_path):
         "src/app.py",
         "src/utils.py",
     ]
+
+def test_init_command_creates_versioned_workspace(tmp_path, monkeypatch):
+    (tmp_path / "app.py").write_text(
+        "value = 1",
+        encoding="utf-8",
+    )
+    def fake_generate_test_plan(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("cli.commands.init.generate_test_plan", fake_generate_test_plan)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        init_command,
+        ["--path", str(tmp_path), "--name", "demo", "--mode", "auto"],
+    )
+
+    # 断言 命令失败时，把 CLI 输出作为断言错误信息显示出来，便于定位
+    assert result.exit_code == 0, result.output
+
+    autotest_path = tmp_path / ".autotest"
+    config_path = autotest_path / "config.yml"
+    snapshot_path = autotest_path / "snapshot.json"
+
+    assert config_path.exists()
+    assert snapshot_path.exists()
+
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    snapshot_data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+    assert config["project"]["name"] == "demo"
+    assert snapshot_data["version"] == 2
+    assert [
+        item["path"]
+        for item in snapshot_data["files"]
+    ] == ["app.py"]
