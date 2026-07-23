@@ -471,3 +471,34 @@ def test_run_graph_success_reaches_commit_once(tmp_path, monkeypatch):
                snapshot.path
                for snapshot in commit_calls[0]
            ] == ["app.py"]
+
+def test_run_affected_rejects_language_framework_mismatch(tmp_path):
+    state = {
+        "changed_files": {
+            "added": ["src/app.js"],
+            "deleted": [],
+            "modified": [],
+        },
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "language": "javascript",
+                    "test_frameworks": ["pytest"],
+                }
+            }
+        )
+    }
+
+    result = run_affected_node(state)
+
+    reason = (
+        "不支持的执行器组合: "
+        "language=javascript, framework=pytest"
+    )
+
+    assert result == {
+        "messages": f"⚠ {reason}",
+        "execution_reports_by_file": {},
+        "errors": [reason],
+    }

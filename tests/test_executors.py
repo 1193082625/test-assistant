@@ -196,3 +196,17 @@ def test_vitest_executor_reports_parse_error(monkeypatch):
     assert report.error_type == "parse_error"
     assert "解析失败" in report.stderr
     assert report.successful is False
+
+def test_select_executor_rejects_language_framework_mismatch():
+    selection = select_executor(
+        framework="pytest",
+        language="javascript",
+        cwd="/frontend",
+    )
+
+    assert selection.supported is False
+    assert selection.executor is None
+    assert selection.reason == (
+        "不支持的执行器组合: "
+        "language=javascript, framework=pytest"
+    )

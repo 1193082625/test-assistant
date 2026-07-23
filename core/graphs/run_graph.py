@@ -88,7 +88,11 @@ def run_affected_node(state: GraphStates):
     结果写入 State
     """
     changed_files = state["changed_files"]
-    test_frameworks = state["project_info"].config["project"]["test_frameworks"]
+    project_config = (
+        state["project_info"].config["project"]
+    )
+    test_frameworks = project_config["test_frameworks"]
+    language = project_config.get("language")
 
     # 没有变更 --> 跳过执行
     if not any(changed_files.values()):
@@ -114,6 +118,7 @@ def run_affected_node(state: GraphStates):
     for framework in test_frameworks:
         candidate = select_executor(
             framework=framework,
+            language=language,
             cwd=project_path,
         )
 
