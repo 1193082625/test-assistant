@@ -6,7 +6,7 @@ from .project import (
     ProjectAnalysis,
     ProjectModule,
 )
-from .source import SourceSymbol
+from .source import SourceSymbol, ImportReference
 
 __all__ = [
     "FrameworkInfo",
@@ -17,4 +17,5 @@ __all__ = [
     "TestFramework",
     "SymbolKind",
     "SourceSymbol",
+    "ImportReference",
 ]

@@ -1,5 +1,5 @@
-from core.models import SourceSymbol, SymbolKind
-from core.analyzers.source import analyze_python_symbols
+from core.models import SourceSymbol, SymbolKind, ImportReference
+from core.analyzers.source import analyze_python_symbols, resolve_python_module_name, extract_python_imports
 
 def test_source_symbol_distinguishes_function_contexts():
     top_level = SourceSymbol(
@@ -277,3 +277,97 @@ def test_function_signature_preserves_parameter_separators(tmp_path):
         "*, strict: bool=False"
         ") -> models.User | None"
     )
+
+def test_class_signature_preserves_generic_bases(tmp_path):
+    source_path = tmp_path / "demo.py"
+    source_path.write_text(
+        (
+            "class Repository(Generic[T], Protocol):\n"
+            "    pass\n"
+        ),
+        encoding="utf-8",
+    )
+
+    symbols = analyze_python_symbols(
+        file_path=str(source_path),
+        module_name="demo",
+    )
+
+    assert len(symbols) == 1
+    assert symbols[0].kind is SymbolKind.CLASS
+    assert symbols[0].signature == (
+        "class Repository(Generic[T], Protocol)"
+    )
+
+def test_resolve_python_module_name_for_src_layout(tmp_path):
+    source_path = tmp_path / "src" / "acme" / "services" / "user.py"
+    source_path.parent.mkdir(parents=True)
+
+    (tmp_path / "src" / "acme" / "__init__.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+
+    (source_path.parent / "__init__.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+
+    source_path.write_text(
+        "def load_user(): pass\n",
+        encoding="utf-8",
+    )
+
+    module_name = resolve_python_module_name(
+        file_path=str(source_path),
+        project_root = str(tmp_path),
+    )
+
+    assert module_name == "acme.services.user"
+
+def test_resolve_python_module_name_for_package_layout(tmp_path):
+    package_path = tmp_path / "acme" / "services"
+    package_path.mkdir(parents=True)
+
+    user_path = package_path / "user.py"
+    init_path = package_path / "__init__.py"
+
+    user_path.write_text(
+        "def load_user(): pass\n",
+        encoding="utf-8",
+    )
+
+    init_path.write_text(
+        "",
+        encoding="utf-8",
+    )
+
+    user_module = resolve_python_module_name(
+        file_path=str(user_path),
+        project_root = str(tmp_path),
+    )
+    package_module = resolve_python_module_name(
+        file_path=str(init_path),
+        project_root = str(tmp_path),
+    )
+
+    assert user_module == "acme.services.user"
+    assert package_module == "acme.services"
+
+def test_extract_python_imports_preserves_aliases_and_levels():
+    source = (
+        "import json\n"
+        "import numpy as np\n"
+        "from .service import UserService as Service\n"
+        "from ..models import User, Role as UserRole\n"
+    )
+
+    imports = extract_python_imports(source)
+
+    assert imports == [
+        ImportReference(module="json"),
+        ImportReference(module="numpy", alias="np"),
+        ImportReference(module="service", imported_name="UserService", alias="Service", relative_level=1),
+        ImportReference(module="models", imported_name="User", relative_level=2),
+        ImportReference(module="models", imported_name="Role", alias="UserRole", relative_level=2),
+    ]

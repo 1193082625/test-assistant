@@ -1,12 +1,81 @@
 """符号与依赖分析"""
 
 import ast
-from importlib.util import source_hash
 from pathlib import Path
 
-from core.models import SourceSymbol, SymbolKind
+from core.models import SourceSymbol, SymbolKind, ImportReference
 
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
+
+def extract_python_imports(source: str) -> list[ImportReference]:
+    """提取 Python 导入，保留别名和相对层级"""
+    tree = ast.parse(source)
+
+    import_nodes = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+
+    import_nodes.sort(
+        key=lambda node: (node.lineno, node.col_offset)
+    )
+
+    references = []
+
+    for node in import_nodes:
+        if isinstance(node, ast.Import):
+            for imported in node.names:
+                references.append(
+                    ImportReference(
+                        module=imported.name,
+                        alias=imported.asname,
+                    )
+                )
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for imported in node.names:
+                references.append(
+                    ImportReference(
+                        module=module,
+                        imported_name=imported.name,
+                        alias=imported.asname,
+                        relative_level=node.level,
+                    )
+                )
+
+    return references
+
+def resolve_python_module_name(file_path: str, project_root: str) -> str:
+    """根据项目根目录计算 Python 模块名"""
+    source_path = Path(file_path).resolve()
+    root_path = Path(project_root).resolve()
+
+    relative_path = source_path.relative_to(root_path)
+    # 把路径拆成 ("src", "acme", "services", "user.py")
+    # 转换成列表 是因为 元组不能修改
+    parts = list(relative_path.parts)
+
+    # src 是源码根目录，不属于 Python 模块名
+    if parts and parts[0] == "src":
+        parts = parts[1:]
+
+    if not parts or not parts[-1].endswith(".py"):
+        raise ValueError(
+            f"不是 Python 源文件：{file_path}"
+        )
+
+    # 取相对路径最后面的 Python 文件名，并把它包装成 Path
+    # 方便安全取得文件名和不带扩展名的模块名
+    module_file = Path(parts[-1])
+
+    # acmes/services/__init__.py -->  acmes/services
+    if module_file.name == "__init__.py":
+        parts = parts[:-1]
+    else:
+        parts[-1] = module_file.stem # 获取不带扩展名的文件名
+
+    return ".".join(parts)
 
 def analyze_python_symbols(file_path: str, module_name: str) -> list[SourceSymbol]:
     """分析 Python 文件中的顶层源码符号"""
@@ -64,7 +133,7 @@ class _SourceSymbolVisitor(ast.NodeVisitor):
                 qualified_name=qualified_name,
                 kind=SymbolKind.CLASS,
                 file_path=self.file_path,
-                signature=f"class {node.name}",
+                signature=_build_class_signature(node),
                 start_line=_node_start_line(node),
                 end_line=node.end_lineno or node.lineno,
                 parent_qualified_name=parent,
@@ -182,4 +251,31 @@ def _build_function_signature(
         f"{async_prefix}{node.name}"
         f"({arguments})"
         f"{return_annotation}"
+    )
+
+def _build_class_signature(node: ast.ClassDef) -> str:
+    """生成包含基类和关键字参数的类签名"""
+    arguments = [
+        ast.unparse(base)
+        for base in node.bases
+    ]
+    # 之所以同时处理 node.keywords 是为了支持 class Model(Base, metaclass=ModelMeta):... 以及少见但合法的 class Model(**class_options):...
+    for keyword in node.keywords:
+        # 当 keyword.arg is None 时，表示它来自 **class_options
+        if keyword.arg is None:
+            arguments.append(
+                f"**{ast.unparse(keyword.value)}"
+            )
+        else:
+            arguments.append(
+                f"{keyword.arg}="
+                f"{ast.unparse(keyword.value)}"
+            )
+
+    if not arguments:
+        return f"class {node.name}"
+
+    return (
+        f"class {node.name}"
+        f"({', '.join(arguments)})"
     )
