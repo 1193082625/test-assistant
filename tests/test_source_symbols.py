@@ -1,5 +1,10 @@
 from core.models import SourceSymbol, SymbolKind, ImportReference
-from core.analyzers.source import analyze_python_symbols, resolve_python_module_name, extract_python_imports
+from core.analyzers.source import (
+    analyze_python_symbols,
+    resolve_python_module_name,
+    extract_python_imports,
+    resolve_import_module
+)
 
 def test_source_symbol_distinguishes_function_contexts():
     top_level = SourceSymbol(
@@ -371,3 +376,35 @@ def test_extract_python_imports_preserves_aliases_and_levels():
         ImportReference(module="models", imported_name="User", relative_level=2),
         ImportReference(module="models", imported_name="Role", alias="UserRole", relative_level=2),
     ]
+
+def test_resolve_relative_import_module():
+    current_module = "acme.services.user"
+
+    sibling = ImportReference(
+        module="service",
+        imported_name="UserService",
+        relative_level=1,
+    )
+    parent = ImportReference(
+        module="models",
+        imported_name="User",
+        relative_level=2,
+    )
+    absolute = ImportReference(
+        module="json"
+    )
+
+    assert resolve_import_module(
+        sibling,
+        current_module=current_module,
+    ) == "acme.services.service"
+
+    assert resolve_import_module(
+        parent,
+        current_module=current_module,
+    ) == "acme.models"
+
+    assert resolve_import_module(
+        absolute,
+        current_module=current_module,
+    ) == "json"

@@ -2,10 +2,42 @@
 
 import ast
 from pathlib import Path
+from sys import prefix
 
 from core.models import SourceSymbol, SymbolKind, ImportReference
 
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
+
+def resolve_import_module(reference: ImportReference, current_module: str, current_is_package: bool = False) -> str:
+    """将导入引用解析成绝对模块名"""
+    if reference.relative_level == 0:
+        return reference.module
+
+    current_parts = current_module.split(".")
+
+    if current_is_package:
+        package_parts = current_parts
+    else:
+        # [1, 2, 3] --> [1, 2]
+        package_parts = current_parts[:-1]
+
+    levels_up = reference.relative_level - 1
+
+    if levels_up >= len(package_parts):
+        raise ValueError(
+            "相对导入超出顶层包： "
+            f"module={current_module}，"
+            f"level={reference.relative_level}"
+        )
+    if levels_up == 0:
+        resolved_paths = list(package_parts)
+    else:
+        resolved_paths = package_parts[:levels_up]
+
+    if reference.module:
+        resolved_paths.extend(reference.module.split("."))
+
+    return ".".join(resolved_paths)
 
 def extract_python_imports(source: str) -> list[ImportReference]:
     """提取 Python 导入，保留别名和相对层级"""
