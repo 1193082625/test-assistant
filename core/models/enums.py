@@ -27,3 +27,8 @@ class TestFramework(StrEnum):
     MOCHA = "mocha"
     AVA = "ava"
     WEBDRIVERIO = "webdriverio"
+
+class SymbolKind(StrEnum):
+    CLASS = "class"
+    FUNCTION = "function"
+    METHOD = "method"

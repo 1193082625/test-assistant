@@ -1,11 +1,12 @@
 """稳定枚举和领域模型"""
 
-from .enums import Language, ProjectType, TestFramework
+from .enums import Language, ProjectType, TestFramework, SymbolKind
 from .project import (
     FrameworkInfo,
     ProjectAnalysis,
     ProjectModule,
 )
+from .source import SourceSymbol
 
 __all__ = [
     "FrameworkInfo",
@@ -13,5 +14,7 @@ __all__ = [
     "ProjectAnalysis",
     "ProjectModule",
     "ProjectType",
-    "TestFramework"
+    "TestFramework",
+    "SymbolKind",
+    "SourceSymbol",
 ]
