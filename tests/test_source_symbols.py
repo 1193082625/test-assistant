@@ -205,3 +205,75 @@ def test_analyze_python_symbols_distinguishes_async_symbols(tmp_path):
     assert request.signature == "async request(url: str) -> bytes"
     assert request.start_line == 5
     assert request.end_line == 7
+
+def test_function_signature_preserves_complex_types_and_defaults(tmp_path):
+    source_path = tmp_path / "demo.py"
+    source_path.write_text(
+        (
+            "def transform(\n"
+            "    items: list[str],\n"
+            "    limit: int | None = None,\n"
+            "    *values: str,\n"
+            "    strict: bool = True,\n"
+            "    **options: object,\n"
+            ") -> dict[str, int]:\n"
+            "    return {}\n"
+        ),
+        encoding="utf-8",
+    )
+
+    symbols = analyze_python_symbols(
+        file_path=str(source_path),
+        module_name="demo",
+    )
+
+    assert len(symbols) == 1
+    assert symbols[0].signature == (
+        "transform("
+        "items: list[str], "
+        "limit: int | None=None, "
+        "*values: str, "
+        "strict: bool=True, "
+        "**options: object"
+        ") -> dict[str, int]"
+    )
+
+def test_function_signature_preserves_parameter_separators(tmp_path):
+    source_path = tmp_path / "demo.py"
+    """
+    参数分隔符的含义： def example(a, /, b, *, c):
+    - a 只能按位置传递
+    - b 既可以按位置，也可以按名称传递
+    - c 只能按名称传递
+    
+    例如：
+    example(1, 2, c=3) # 正确
+    example(1, b=2, c=3) # 正确
+    example(a=1, b=2, c=3) # 错误，a 是仅限位置参数
+    """
+    source_path.write_text(
+        (
+            "def find_user(\n"
+            "    user: models.User,\n"
+            "    /,\n"
+            "    fallback: str | None = None,\n"
+            "    *,\n"
+            "    strict: bool = False,\n"
+            ") -> models.User | None:\n"
+            "    return user\n"
+        ),
+        encoding="utf-8",
+    )
+
+    symbols = analyze_python_symbols(
+        file_path=str(source_path),
+        module_name="demo",
+    )
+
+    assert symbols[0].signature == (
+        "find_user("
+        "user: models.User, /, "
+        "fallback: str | None=None, "
+        "*, strict: bool=False"
+        ") -> models.User | None"
+    )
