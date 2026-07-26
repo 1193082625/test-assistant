@@ -43,3 +43,15 @@ class TestabilityAssessment:
     symbol: SourceSymbol
     status: TestabilityStatus
     reasons: list[str] = field(default_factory=list)
+
+@dataclass(frozen=True)
+class TestIndexEntry:
+    """
+    已有测试于源码符号之间的一条映射关系
+    为什么一条记录只保存一个测试和一个源码符号？
+    一个测试可能测试多个源码符号；通过一个源码符号也可以有多个测试；这种一对多、多对多关系用多条简单记录表达，比在一个字段里塞多层列表更容易查询、去重和序列化
+    """
+    source_qualified_name: str
+    test_qualified_name: str
+    test_file_path: str
+    test_line: int

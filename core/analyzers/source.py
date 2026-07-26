@@ -163,6 +163,28 @@ def analyze_python_symbols(file_path: str, module_name: str) -> list[SourceSymbo
 
     return visitor.symbols
 
+def analyze_python_test_symbols(file_path: str, module_name: str) -> list[SourceSymbol]:
+    """提取 pytest 可以收集的测试函数符号"""
+
+    symbols = analyze_python_symbols(file_path, module_name)
+
+    return [
+        symbol
+        for symbol in symbols
+        if (
+            symbol.name.startswith("test_") # 要求名称符合 pytest 的测试函数规则
+            and (
+                symbol.parent_qualified_name is None # 是顶层测试函数
+                or ( # 或者 Test 类中的测试方法，这样可以避免把嵌套函数误认为 pytest 测试
+                    symbol.kind is SymbolKind.METHOD
+                    and symbol.owner_class is not None
+                    and symbol.owner_class.startswith("Test")
+                )
+            )
+        )
+    ]
+
+
 """
 ast.NodeVisitor ： NodeVisitor 会根据节点类型自动寻找对应方法:
 比如 遇到 ClassDef -> 调用 visit_ClassDef()

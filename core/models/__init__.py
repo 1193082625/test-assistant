@@ -6,7 +6,7 @@ from .project import (
     ProjectAnalysis,
     ProjectModule,
 )
-from .source import SourceSymbol, ImportReference, TestabilityAssessment
+from .source import SourceSymbol, ImportReference, TestabilityAssessment, TestIndexEntry
 
 __all__ = [
     "FrameworkInfo",
@@ -20,4 +20,5 @@ __all__ = [
     "ImportReference",
     "TestabilityAssessment",
     "TestabilityStatus",
+    "TestIndexEntry"
 ]
