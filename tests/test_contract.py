@@ -1,4 +1,15 @@
-from core.analyzers.contract import extract_python_contract_evidence
+
+from core.models import (
+    ContractEvidence,
+    EvidenceKind,
+    EvidenceStrength,
+    TestIndex as Index,
+    TestIndexEntry as IndexEntry,
+)
+from core.analyzers.contract import (
+    extract_python_contract_evidence,
+    extract_existing_test_evidence
+)
 from core.models import (
     ContractEvidence,
     EvidenceKind,
@@ -38,7 +49,13 @@ def test_extracts_function_docstring_as_contract_evidence(tmp_path):
         module_name="demo",
     )
 
-    assert evidence == [
+    docstring_evidence = [
+        item
+        for item in evidence
+        if item.kind is EvidenceKind.DOCSTRING
+    ]
+
+    assert docstring_evidence == [
         ContractEvidence(
             symbol_qualified_name="demo.add",
             kind=EvidenceKind.DOCSTRING,
@@ -46,5 +63,67 @@ def test_extracts_function_docstring_as_contract_evidence(tmp_path):
             source_path=str(source_path),
             source_line=2,
             strength=EvidenceStrength.MEDIUM
+        )
+    ]
+
+# extract 提炼，提取
+# hint 提示，暗示
+# contract 契约，约定
+# evidence 证据，证明
+def test_extracts_type_hints_as_contract_evidence(tmp_path):
+    """测试提炼类型提示作为契约证明"""
+    source_path = tmp_path / "demo.py"
+    source_path.write_text(
+        (
+            "def parse(\n"
+            "    value: str,\n"
+            "    limit: int = 10,\n"
+            ") -> list[str]:\n"
+            "    return [value][:limit]\n"
+        ),
+        encoding="utf-8",
+    )
+
+    evidence = extract_python_contract_evidence(
+        file_path=str(source_path),
+        module_name="demo",
+    )
+
+    assert evidence == [
+        ContractEvidence(
+            symbol_qualified_name="demo.parse",
+            kind=EvidenceKind.TYPE_HINT,
+            content=(
+                "parse(value: str, "
+                "limit: int=10) -> list[str]"
+            ),
+            source_path = str(source_path),
+            source_line=1,
+            strength=EvidenceStrength.MEDIUM
+        )
+    ]
+
+def test_converts_existing_test_index_to_strong_evidence():
+    index = Index(
+        entries=[
+            IndexEntry(
+                source_qualified_name="demo.add",
+                test_qualified_name="tests.test_demo.test_add",
+                test_file_path="tests/test_demo.py",
+                test_line=3
+            )
+        ]
+    )
+
+    evidence = extract_existing_test_evidence(index)
+
+    assert evidence == [
+        ContractEvidence(
+            symbol_qualified_name="demo.add",
+            kind=EvidenceKind.EXISTING_TEST,
+            content="tests.test_demo.test_add",
+            source_path="tests/test_demo.py",
+            source_line=3,
+            strength=EvidenceStrength.STRONG
         )
     ]

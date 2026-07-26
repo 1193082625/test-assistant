@@ -43,6 +43,7 @@ class EvidenceKind(StrEnum):
     TYPE_HINT="type_hint"
     EXISTING="existing_test"
     SCHEMA="schema"
+    EXISTING_TEST="existing_test"
 
 class EvidenceStrength(StrEnum):
     STRONG="strong"

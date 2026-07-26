@@ -12,6 +12,7 @@ from core.models import (
     ContractEvidence,
     EvidenceKind,
     EvidenceStrength,
+    TestIndex
 )
 
 ContractNode: TypeAlias = (
@@ -19,6 +20,23 @@ ContractNode: TypeAlias = (
     | ast.FunctionDef
     | ast.AsyncFunctionDef
 )
+
+def extract_existing_test_evidence(
+        index: TestIndex
+) -> list[ContractEvidence]:
+    """把已有测试索引转换为强契约证据"""
+
+    return [
+        ContractEvidence(
+            symbol_qualified_name=entry.source_qualified_name,
+            kind=EvidenceKind.EXISTING_TEST,
+            content=entry.test_qualified_name,
+            source_path=entry.test_file_path,
+            source_line=entry.test_line,
+            strength=EvidenceStrength.STRONG,
+        )
+        for entry in index.entries
+    ]
 
 def extract_python_contract_evidence(
         file_path: str,
@@ -80,9 +98,67 @@ class _ContractEvidenceVisitor(ast.NodeVisitor):
             qualified_name=qualified_name,
         )
 
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            self._record_type_hints(node=node, qualified_name=qualified_name)
+
         self.qualified_stack.append(qualified_name)
         self.generic_visit(node)
         self.qualified_stack.pop()
+
+    def _record_type_hints(
+            self,
+            node: ast.FunctionDef | ast.AsyncFunctionDef,
+            qualified_name: str,
+    ) -> None:
+
+        argument_nodes = [
+            *node.args.posonlyargs,
+            *node.args.args,
+            *node.args.kwonlyargs,
+        ]
+
+        if node.args.vararg is not None:
+            argument_nodes.append(node.args.vararg)
+
+        if node.args.kwarg is not None:
+            argument_nodes.append(node.args.kwarg)
+
+        has_parameter_hint = any(
+            argument.annotation is not None
+            for argument in argument_nodes
+        )
+
+        has_return_hint = node.returns is not None
+
+        if not has_parameter_hint and not has_return_hint:
+            return
+
+        async_prefix = (
+            "async "
+            if isinstance(node, ast.AsyncFunctionDef)
+            else ""
+        )
+
+        signature = (
+            f"{async_prefix}{node.name}"
+            f"({ast.unparse(node.args)})"
+        )
+
+        if node.returns is not None:
+            signature += (
+                f" -> {ast.unparse(node.returns)}"
+            )
+
+        self.evidence.append(
+            ContractEvidence(
+                symbol_qualified_name=qualified_name,
+                kind=EvidenceKind.TYPE_HINT,
+                content=signature,
+                source_path=self.file_path,
+                source_line=node.lineno,
+                strength=EvidenceStrength.MEDIUM
+            )
+        )
 
     def _build_qualified_name(self, name: str) -> str:
         if self.qualified_stack:
