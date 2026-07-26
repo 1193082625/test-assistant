@@ -1,12 +1,27 @@
 """稳定枚举和领域模型"""
 
-from .enums import Language, ProjectType, TestFramework, SymbolKind, TestabilityStatus
+from .enums import (
+    Language,
+    ProjectType,
+    TestFramework,
+    SymbolKind,
+    TestabilityStatus,
+    EvidenceKind,
+    EvidenceStrength
+)
 from .project import (
     FrameworkInfo,
     ProjectAnalysis,
     ProjectModule,
 )
-from .source import SourceSymbol, ImportReference, TestabilityAssessment, TestIndexEntry, TestIndex
+from .source import (
+    SourceSymbol,
+    ImportReference,
+    TestabilityAssessment,
+    TestIndexEntry,
+    TestIndex,
+    ContractEvidence
+)
 
 __all__ = [
     "FrameworkInfo",
@@ -21,5 +36,8 @@ __all__ = [
     "TestabilityAssessment",
     "TestabilityStatus",
     "TestIndexEntry",
-    "TestIndex"
+    "TestIndex",
+    "EvidenceKind",
+    "EvidenceStrength",
+    "ContractEvidence",
 ]

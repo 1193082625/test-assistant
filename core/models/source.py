@@ -1,7 +1,7 @@
 """源码符号领域模型"""
 
 from dataclasses import dataclass, field
-from .enums import SymbolKind, TestabilityStatus
+from .enums import SymbolKind, TestabilityStatus, EvidenceKind, EvidenceStrength
 
 
 @dataclass
@@ -90,3 +90,15 @@ class TestIndex:
                 entry.test_line,
             ),
         )
+
+@dataclass(frozen=True)
+class ContractEvidence:
+    """一条可追踪的源码契约证据"""
+
+    symbol_qualified_name: str
+    kind: EvidenceKind
+    content: str
+    source_path: str
+    source_line: int
+    source_line: int
+    strength: EvidenceStrength

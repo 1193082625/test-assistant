@@ -37,3 +37,14 @@ class TestabilityStatus(StrEnum):
     DIRECT="direct"
     NEEDS_ISOLATION="needs_isolation"
     NOT_DIRECT="not_direct"
+
+class EvidenceKind(StrEnum):
+    DOCSTRING="docstring"
+    TYPE_HINT="type_hint"
+    EXISTING="existing_test"
+    SCHEMA="schema"
+
+class EvidenceStrength(StrEnum):
+    STRONG="strong"
+    MEDIUM="medium"
+    WEAK="weak"
