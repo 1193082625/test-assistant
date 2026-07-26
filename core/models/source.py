@@ -47,11 +47,46 @@ class TestabilityAssessment:
 @dataclass(frozen=True)
 class TestIndexEntry:
     """
-    已有测试于源码符号之间的一条映射关系
-    为什么一条记录只保存一个测试和一个源码符号？
-    一个测试可能测试多个源码符号；通过一个源码符号也可以有多个测试；这种一对多、多对多关系用多条简单记录表达，比在一个字段里塞多层列表更容易查询、去重和序列化
+    不可变的一条事实
+    已有测试与源码符号之间的一条映射关系。
+    多对多关系使用多条简单记录表达，
+    便于查询、去重和序列化。
     """
     source_qualified_name: str
     test_qualified_name: str
     test_file_path: str
     test_line: int
+
+
+@dataclass
+class TestIndex:
+    """
+    可更新的事实集合
+    已有测试索引及其查询行为
+    """
+    entries: list[TestIndexEntry] = field(default_factory=list)
+
+    def has_tests_for(self, source_qualified_name: str) -> bool:
+        # any() 遇到第一个 True 就会停止，不需要继续扫描后面的条目
+        return any(
+            entry.source_qualified_name == source_qualified_name
+            for entry in self.entries
+        )
+
+    def tests_for(self, source_qualified_name: str) -> list[TestIndexEntry]:
+        matched_entries = [
+            entry
+            for entry in self.entries
+            if (
+                entry.source_qualified_name == source_qualified_name
+            )
+        ]
+
+        return sorted(
+            matched_entries,
+            key=lambda entry: (
+                entry.test_qualified_name,
+                entry.test_file_path,
+                entry.test_line,
+            ),
+        )

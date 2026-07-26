@@ -9,7 +9,8 @@ from core.models import (
     ImportReference,
     TestabilityStatus,
     TestabilityAssessment,
-    TestIndexEntry as IndexEntry,
+    TestIndexEntry,
+    TestIndex
 )
 
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
@@ -155,8 +156,20 @@ def resolve_python_module_name(file_path: str, project_root: str) -> str:
 
     return ".".join(parts)
 
+def filter_symbols_without_existing_tests(
+        source_symbols: list[SourceSymbol],
+        test_index: TestIndex,
+) -> list[SourceSymbol]:
+    """过滤已经存在直接测试映射的源码符号"""
+
+    return [
+        symbol
+        for symbol in source_symbols
+        if not test_index.has_tests_for(symbol.qualified_name)
+    ]
+
 def analyze_python_symbols(file_path: str, module_name: str) -> list[SourceSymbol]:
-    """分析 Python 文件中的顶层源码符号"""
+    """分析 Python 文件中的类、函数和方法符号"""
     source_path = Path(file_path)
     source = source_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -195,7 +208,7 @@ def index_python_test_file(
         module_name: str,
         project_root: str,
         source_symbols: list[SourceSymbol],
-) -> list[IndexEntry]:
+) -> list[TestIndexEntry]:
     """
     建立一个 python 测试文件到源码符号的索引
 
@@ -205,7 +218,7 @@ def index_python_test_file(
     def test_add() -> None:
         assert add(1, 2) == 3
     """
-    test_path = Path(file_path) # 解析测试文件地址 (test_demo.py的解析地址)
+    test_path = Path(file_path) # 构造测试文件路径对象
     source = test_path.read_text(encoding="utf-8") # 读取测试文件内容
     tree = ast.parse(source) # 将测试文件内容解析成 ast 树
 
@@ -217,39 +230,49 @@ def index_python_test_file(
     }
 
     imported_targets: dict[str, str] = {}
+    imported_modules: dict[str, str] = {}
 
     # 遍历测试文件节点
     for node in tree.body:
-        # 如果是 from ... import ...
-        if (
-            isinstance(node, ast.ImportFrom)
-            and node.level == 0
-            and node.module is not None
+        if isinstance(node, ast.Import):
+            for imported in node.names:
+                if imported.asname is not None:
+                    local_name = imported.asname
+                    module_name_in_source = imported.name
+                else:
+                    local_name = imported.name.split(".")[0]
+                    module_name_in_source = local_name
+
+                imported_modules[local_name] = (
+                    module_name_in_source
+                )
+
+        elif (
+                isinstance(node, ast.ImportFrom)
+                and node.level == 0
+                and node.module is not None
         ):
             for imported in node.names:
-                # 获取引入模块名称
-                local_name = imported.asname or imported.name # add
-                target_name = f"{node.module}.{imported.name}" # demo.add
+                local_name = (
+                        imported.asname
+                        or imported.name
+                )
+                target_name = (
+                    f"{node.module}.{imported.name}"
+                )
 
-                # 这个判断用于排除第三方函数，比如 from pytest import raises 匹配不到 source_names，就不会错误索引成项目的被测源码
                 if target_name in source_names:
-                    imported_targets[local_name] = target_name # imported_targets == { "add": "demo.add" }
+                    imported_targets[local_name] = (
+                        target_name
+                    )
 
-    """
-    保存 AST，可检查函数内部调用
-    从测试文件顶层找到所有 test_ 开头的函数
-    
-    结果大致是
-    test_nodes == {
-        "test_add": <ast.FunctionDef 对象>,
-    }
-    """
-    test_nodes = {
-        node.name: node
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name.startswith("test_")
-    }
+    # 按限定名保存pytest测试函数的AST节点
+    # 既包含顶层测试函数，也包含 Test 类中的测试方法
+    # 使用限定名可以避免不同测试类中的同名方法互相覆盖
+    test_nodes = _collect_test_function_nodes(
+        tree=tree,
+        module_name=module_name,
+    )
 
     # 保存稳定的领域模型，包含限定名、文件、行号
     test_symbols = analyze_python_test_symbols(
@@ -263,10 +286,10 @@ def index_python_test_file(
         .as_posix()
     )
 
-    entries: list[IndexEntry] = []
+    entries: list[TestIndexEntry] = []
 
     for test_symbol in test_symbols:
-        test_node = test_nodes.get(test_symbol.name)
+        test_node = test_nodes.get(test_symbol.qualified_name)
 
         if test_node is None:
             continue
@@ -276,11 +299,27 @@ def index_python_test_file(
         for call_name in call_names:
             # 从本地名称找到真实源码符号
             target_name = imported_targets.get(call_name)
+
+            if target_name is None:
+                call_parts = call_name.split(".")
+                imported_module = imported_modules.get(call_parts[0])
+
+                if imported_module is not None:
+                    candidate_name = ".".join(
+                        [
+                            imported_module,
+                            *call_parts[1:],
+                        ]
+                    )
+
+                    if candidate_name in source_names:
+                        target_name = candidate_name
+
             if target_name is None:
                 continue
 
             entries.append(
-                IndexEntry(
+                TestIndexEntry(
                     source_qualified_name=target_name,
                     test_qualified_name=test_symbol.qualified_name,
                     test_file_path=relative_test_path,
@@ -294,6 +333,68 @@ def index_python_test_file(
         entry.test_file_path,
         entry.test_line,
     ))
+
+def index_python_project_tests(
+        project_root: str,
+        source_symbols: list[SourceSymbol],
+) -> TestIndex:
+    """扫描项目中的正式 pytest 文件并建立索引"""
+
+    # 放在函数内部的延迟导入 表示只有实际建立项目索引时才导入排除规则，也降低分析器模块之间在加载阶段互相依赖的风险
+    from core.analyzers.framework import EXCLUDE_DIRS
+
+    root_path = Path(project_root).resolve()
+    exclude_dirs = set(EXCLUDE_DIRS)
+
+    test_paths = [
+        path
+        for path in root_path.rglob('*.py')
+        if (
+            _is_python_test_file(path)
+            and not any(
+                part in exclude_dirs
+                for part in (
+                    # [:-1] 表示取列表中从零到倒数第二个元素 (".venv", "tests", "test_demo.py") -> (".venv", "tests")
+                    path.relative_to(root_path).parts[:-1]
+                )
+            )
+        )
+    ]
+
+    entries: list[TestIndexEntry] = []
+
+    for test_paths in sorted(
+        test_paths,
+        key=lambda path: path.as_posix(),
+    ):
+        module_name = resolve_python_module_name(
+            file_path=str(test_paths),
+            project_root=str(root_path),
+        )
+
+        entries.extend(
+            index_python_test_file(
+                file_path=str(test_paths),
+                module_name=module_name,
+                project_root=str(root_path),
+                source_symbols=source_symbols,
+            )
+        )
+
+    entries.sort(key=lambda entry: (
+        entry.test_qualified_name,
+        entry.source_qualified_name,
+        entry.test_file_path,
+        entry.test_line,
+    ))
+
+    return TestIndex(entries=entries)
+
+def _is_python_test_file(path: Path) -> bool:
+    return (
+        path.name.startswith("test_")
+        or path.name.endswith("_test.py")
+    )
 
 def _collect_function_calls(node: FunctionNode) -> set[str]:
     visitor = _FunctionCallVisitor()
@@ -488,6 +589,47 @@ def _detect_function_side_effects(node: FunctionNode) -> list[str]:
         visitor.visit(statement)
 
     return  sorted(visitor.effects)
+
+def _collect_test_function_nodes(
+        tree: ast.Module,
+        module_name: str,
+) -> dict[str, FunctionNode]:
+    visitor = _TestFunctionNodeVisitor(
+        module_name=module_name,
+    )
+    visitor.visit(tree)
+    return visitor.nodes
+
+class _TestFunctionNodeVisitor(ast.NodeVisitor):
+    """按限定名保存测试函数的 AST 节点"""
+    def __init__(self, module_name: str) -> None:
+        self.module_name = module_name
+        self.class_stack: list[str] = []
+        self.nodes: dict[str, FunctionNode] = {}
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.class_stack.append(node.name)
+        self.generic_visit(node)
+        self.class_stack.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._record_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._record_function(node)
+
+    def _record_function(self, node: FunctionNode) -> None:
+        if not node.name.startswith("test_"):
+            return
+
+        name_parts = [
+            self.module_name,
+            *self.class_stack,
+            node.name,
+        ]
+        qualified_name = ".".join(name_parts)
+
+        self.nodes[qualified_name] = node
 
 
 def _build_function_symbol(
