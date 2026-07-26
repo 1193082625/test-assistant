@@ -1,12 +1,52 @@
 """符号与依赖分析"""
 
 import ast
+from ast import NodeVisitor
 from pathlib import Path
-from sys import prefix
 
-from core.models import SourceSymbol, SymbolKind, ImportReference
+from core.models import SourceSymbol, SymbolKind, ImportReference, TestabilityStatus, TestabilityAssessment
 
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
+
+def classify_symbol_testability(symbol: SourceSymbol) -> TestabilityAssessment:
+    """根据符号上下文判断是否可直接测试"""
+    if symbol.kind is SymbolKind.CLASS:
+        return TestabilityAssessment(
+            symbol=symbol,
+            status=TestabilityStatus.NOT_DIRECT,
+            reasons=[
+                "类本身不是可直接执行的测试入口"
+            ],
+        )
+
+    if symbol.kind is SymbolKind.FUNCTION and symbol.parent_qualified_name is not None:
+        return TestabilityAssessment(
+            symbol=symbol,
+            status=TestabilityStatus.NOT_DIRECT,
+            reasons=["嵌套函数不能通过模块路径直接导入"]
+        )
+
+    if symbol.name.startswith("_"):
+        return TestabilityAssessment(
+            symbol=symbol,
+            status=TestabilityStatus.NOT_DIRECT,
+            reasons=["私有符号默认不作为直接测试入口"]
+        )
+
+    if symbol.side_effects:
+        return TestabilityAssessment(
+            symbol=symbol,
+            status=TestabilityStatus.NEEDS_ISOLATION,
+            reasons=[
+                f"符号包含 {effect} 副作用，需要隔离后测试"
+                for effect in symbol.side_effects
+            ]
+        )
+
+    return TestabilityAssessment(
+        symbol=symbol,
+        status=TestabilityStatus.DIRECT,
+    )
 
 def resolve_import_module(reference: ImportReference, current_module: str, current_is_package: bool = False) -> str:
     """将导入引用解析成绝对模块名"""
@@ -233,6 +273,61 @@ def _node_start_line(node: ast.ClassDef | FunctionNode) -> int:
 
     return node.lineno
 
+def _get_call_name(node: ast.expr) -> str | None:
+    """辅助函数： 把调用目标还原成带层级的名称"""
+    if isinstance(node, ast.Name):
+        return node.id
+
+    if isinstance(node, ast.Attribute):
+        parent_name = _get_call_name(node.value)
+
+        if parent_name is None:
+            return None
+
+        return f"{parent_name}.{node.attr}"
+
+    return None
+
+class _FunctionSideEffectVisitor(ast.NodeVisitor):
+    """检测单个函数自身的副作用，不进入嵌套函数或嵌套类"""
+    def __init__(self) -> None:
+        self.effects: set[str] = set()
+
+    def visit_Call(self, node: ast.Call) -> None:
+        call_name = _get_call_name(node.func)
+
+        if call_name == "open":
+            self.effects.add("filesystem")
+
+        if call_name in {
+            "subprocess.run",
+            "subprocess.call",
+            "subprocess.check_call",
+            "subprocess.check_output",
+            "subprocess.Popen",
+        }:
+            self.effects.add("subprocess")
+
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        return
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        return
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        return
+
+def _detect_function_side_effects(node: FunctionNode) -> list[str]:
+    visitor = _FunctionSideEffectVisitor()
+
+    for statement in node.body:
+        visitor.visit(statement)
+
+    return  sorted(visitor.effects)
+
+
 def _build_function_symbol(
         node: FunctionNode,
         file_path: str,
@@ -260,6 +355,7 @@ def _build_function_symbol(
             ast.unparse(decorator) for decorator in node.decorator_list
         ],
         is_async=isinstance(node, ast.AsyncFunctionDef),
+        side_effects=_detect_function_side_effects(node),
     )
 
 def _build_function_signature(

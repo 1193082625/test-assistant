@@ -3,7 +3,7 @@ from core.analyzers.source import (
     analyze_python_symbols,
     resolve_python_module_name,
     extract_python_imports,
-    resolve_import_module
+    resolve_import_module,
 )
 
 def test_source_symbol_distinguishes_function_contexts():
@@ -408,3 +408,36 @@ def test_resolve_relative_import_module():
         absolute,
         current_module=current_module,
     ) == "json"
+
+def test_resolve_imports_from_package_init():
+    source = (
+        "from . import settings\n"
+        "from .user import User\n"
+    )
+
+    references = extract_python_imports(source)
+
+    assert references == [
+        ImportReference(
+            module="",
+            imported_name="settings",
+            relative_level=1,
+        ),
+        ImportReference(
+            module="user",
+            imported_name="User",
+            relative_level=1,
+        )
+    ]
+    resolved_modules = [
+        resolve_import_module(
+            reference,
+            current_module="acme.services",
+            current_is_package=True,
+        )
+        for reference in references
+    ]
+    assert resolved_modules == [
+        "acme.services",
+        "acme.services.user",
+    ]

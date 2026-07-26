@@ -32,3 +32,8 @@ class SymbolKind(StrEnum):
     CLASS = "class"
     FUNCTION = "function"
     METHOD = "method"
+
+class TestabilityStatus(StrEnum):
+    DIRECT="direct"
+    NEEDS_ISOLATION="needs_isolation"
+    NOT_DIRECT="not_direct"

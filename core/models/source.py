@@ -1,7 +1,8 @@
 """源码符号领域模型"""
 
 from dataclasses import dataclass, field
-from .enums import SymbolKind
+from .enums import SymbolKind, TestabilityStatus
+
 
 @dataclass
 class SourceSymbol:
@@ -21,6 +22,10 @@ class SourceSymbol:
     )
     is_async: bool = False
 
+    side_effects: list[str] = field(
+        default_factory=list,
+    )
+
 
 # frozen=True 表示对象创建后不能修改，适合表达已经从源码提取出的事实
 @dataclass(frozen=True)
@@ -30,3 +35,11 @@ class ImportReference:
     imported_name: str | None = None
     alias: str | None = None
     relative_level: int = 0
+
+
+@dataclass(frozen=True)
+class TestabilityAssessment:
+    """一个源码符号的可测性判断"""
+    symbol: SourceSymbol
+    status: TestabilityStatus
+    reasons: list[str] = field(default_factory=list)
