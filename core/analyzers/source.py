@@ -1,10 +1,16 @@
 """符号与依赖分析"""
 
 import ast
-from ast import NodeVisitor
 from pathlib import Path
 
-from core.models import SourceSymbol, SymbolKind, ImportReference, TestabilityStatus, TestabilityAssessment
+from core.models import (
+    SourceSymbol,
+    SymbolKind,
+    ImportReference,
+    TestabilityStatus,
+    TestabilityAssessment,
+    TestIndexEntry as IndexEntry,
+)
 
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 
@@ -184,6 +190,140 @@ def analyze_python_test_symbols(file_path: str, module_name: str) -> list[Source
         )
     ]
 
+def index_python_test_file(
+        file_path: str,
+        module_name: str,
+        project_root: str,
+        source_symbols: list[SourceSymbol],
+) -> list[IndexEntry]:
+    """
+    建立一个 python 测试文件到源码符号的索引
+
+    以以下测试为例
+    # test_demo.py
+    from demo import add
+    def test_add() -> None:
+        assert add(1, 2) == 3
+    """
+    test_path = Path(file_path) # 解析测试文件地址 (test_demo.py的解析地址)
+    source = test_path.read_text(encoding="utf-8") # 读取测试文件内容
+    tree = ast.parse(source) # 将测试文件内容解析成 ast 树
+
+    # 获取源码符号（对应源码中的函数名称）
+    # {"demo.add"}
+    source_names = {
+        symbol.qualified_name
+        for symbol in source_symbols
+    }
+
+    imported_targets: dict[str, str] = {}
+
+    # 遍历测试文件节点
+    for node in tree.body:
+        # 如果是 from ... import ...
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and node.module is not None
+        ):
+            for imported in node.names:
+                # 获取引入模块名称
+                local_name = imported.asname or imported.name # add
+                target_name = f"{node.module}.{imported.name}" # demo.add
+
+                # 这个判断用于排除第三方函数，比如 from pytest import raises 匹配不到 source_names，就不会错误索引成项目的被测源码
+                if target_name in source_names:
+                    imported_targets[local_name] = target_name # imported_targets == { "add": "demo.add" }
+
+    """
+    保存 AST，可检查函数内部调用
+    从测试文件顶层找到所有 test_ 开头的函数
+    
+    结果大致是
+    test_nodes == {
+        "test_add": <ast.FunctionDef 对象>,
+    }
+    """
+    test_nodes = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+    }
+
+    # 保存稳定的领域模型，包含限定名、文件、行号
+    test_symbols = analyze_python_test_symbols(
+        file_path=file_path,
+        module_name=module_name,
+    )
+
+    relative_test_path = (
+        test_path.resolve()
+        .relative_to(Path(project_root).resolve())
+        .as_posix()
+    )
+
+    entries: list[IndexEntry] = []
+
+    for test_symbol in test_symbols:
+        test_node = test_nodes.get(test_symbol.name)
+
+        if test_node is None:
+            continue
+
+        call_names = _collect_function_calls(test_node)
+
+        for call_name in call_names:
+            # 从本地名称找到真实源码符号
+            target_name = imported_targets.get(call_name)
+            if target_name is None:
+                continue
+
+            entries.append(
+                IndexEntry(
+                    source_qualified_name=target_name,
+                    test_qualified_name=test_symbol.qualified_name,
+                    test_file_path=relative_test_path,
+                    test_line=test_node.lineno
+                )
+            )
+
+    return sorted(entries, key=lambda entry: (
+        entry.source_qualified_name,
+        entry.test_qualified_name,
+        entry.test_file_path,
+        entry.test_line,
+    ))
+
+def _collect_function_calls(node: FunctionNode) -> set[str]:
+    visitor = _FunctionCallVisitor()
+
+    for statement in node.body:
+        visitor.visit(statement)
+
+    return visitor.call_names
+
+class _FunctionCallVisitor(ast.NodeVisitor):
+    """收集一个函数自身直接包含的调用名称"""
+    def __init__(self) -> None:
+        self.call_names: set[str] = set()
+
+    def visit_Call(self, node: ast.Call) -> None:
+        call_name = _get_call_name(node.func)
+
+        if call_name is not None:
+            self.call_names.add(call_name)
+
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        return
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        return
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        return
 
 """
 ast.NodeVisitor ： NodeVisitor 会根据节点类型自动寻找对应方法:
