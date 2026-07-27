@@ -41,7 +41,6 @@ class TestabilityStatus(StrEnum):
 class EvidenceKind(StrEnum):
     DOCSTRING="docstring"
     TYPE_HINT="type_hint"
-    EXISTING="existing_test"
     SCHEMA="schema"
     EXISTING_TEST="existing_test"
 

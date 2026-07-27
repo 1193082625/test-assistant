@@ -100,5 +100,4 @@ class ContractEvidence:
     content: str
     source_path: str
     source_line: int
-    source_line: int
     strength: EvidenceStrength

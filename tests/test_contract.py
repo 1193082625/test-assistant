@@ -8,12 +8,8 @@ from core.models import (
 )
 from core.analyzers.contract import (
     extract_python_contract_evidence,
-    extract_existing_test_evidence
-)
-from core.models import (
-    ContractEvidence,
-    EvidenceKind,
-    EvidenceStrength,
+    extract_existing_test_evidence,
+    extract_schema_reference_evidence,
 )
 
 def test_contract_evidence_records_source_and_strength():
@@ -127,3 +123,20 @@ def test_converts_existing_test_index_to_strong_evidence():
             strength=EvidenceStrength.STRONG
         )
     ]
+
+def test_converts_schema_reference_to_strong_evidence():
+    evidence = extract_schema_reference_evidence(
+        symbol_qualified_name="api.create_user",
+        schema_path="openapi.yaml",
+        schema_reference="#/components/schemas/User",
+        source_line=18
+    )
+
+    assert evidence == ContractEvidence(
+        symbol_qualified_name="api.create_user",
+        kind=EvidenceKind.SCHEMA,
+        content="#/components/schemas/User",
+        source_path="openapi.yaml",
+        source_line=18,
+        strength=EvidenceStrength.STRONG # schema 是明确的结构化契约，因此强度为 STRONG
+    )

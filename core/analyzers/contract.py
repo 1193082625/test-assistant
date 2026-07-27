@@ -21,6 +21,24 @@ ContractNode: TypeAlias = (
     | ast.AsyncFunctionDef
 )
 
+def extract_schema_reference_evidence(
+        symbol_qualified_name: str,
+        schema_path: str,
+        schema_reference: str,
+        source_line: int,
+) -> ContractEvidence:
+    """把 Schema 引用转换为 强契约证据"""
+
+    return ContractEvidence(
+        symbol_qualified_name=symbol_qualified_name,
+        kind=EvidenceKind.SCHEMA,
+        content=schema_reference,
+        source_path=schema_path,
+        source_line=source_line,
+        strength=EvidenceStrength.STRONG,
+    )
+
+
 def extract_existing_test_evidence(
         index: TestIndex
 ) -> list[ContractEvidence]:
