@@ -166,3 +166,45 @@ def test_finds_affected_tests_from_changed_files(tmp_path):
             test_line=3
         )
     ]
+
+def test_returns_no_direct_tests_when_symbol_has_no_mapping(tmp_path):
+    """验证 源码有变化， 但没有已有测试映射"""
+    source_path = tmp_path / "demo.py"
+    source_path.write_text(
+        (
+            "def add(a, b):\n"
+            "    return a + b\n"
+        ),
+        encoding="utf-8",
+    )
+
+    affected_tests = find_affected_python_tests(
+        project_root=str(tmp_path),
+        changed_files={
+            "added": [],
+            "modified": ["demo.py"],
+            "deleted": [],
+        }
+    )
+    assert affected_tests == [] # 表示没有找到直接关联的已有测试
+
+def test_ignores_changed_non_python_files(tmp_path):
+    """验证非 python 文件不会进入 Python AST 分析"""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        '{"enabled": true}',
+        encoding="utf-8",
+    )
+
+    changed_symbol_names = (
+        find_changed_python_symbol_names(
+            project_root=str(tmp_path),
+            changed_files={
+                "added": [],
+                "modified": ["config.json"],
+                "deleted": [],
+            }
+        )
+    )
+
+    assert changed_symbol_names == []
