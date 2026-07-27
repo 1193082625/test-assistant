@@ -1,0 +1,168 @@
+from core.analyzers.impact import (
+    find_directly_affected_tests,
+    find_changed_python_symbol_names,
+    find_affected_python_tests
+)
+
+from core.models import (
+    TestIndex as Index,
+    TestIndexEntry as IndexEntry
+)
+
+def test_finds_tests_for_changed_source_symbol():
+    """
+    测试查找变更源码符号直接关联的已有测试
+
+    调用过程：
+    changed_symbol_qualified_names
+    → 逐个取得 qualified_name
+    → test_index.tests_for(qualified_name)
+    → 找到该源码符号对应的索引条目
+    → 合并到 affected_tests
+    """
+    add_test = IndexEntry(
+        source_qualified_name="demo.add",
+        test_qualified_name="tests.test_demo.test_add",
+        test_file_path="tests/test_demo.py",
+        test_line=3
+    )
+
+    subtract_test = IndexEntry(
+        source_qualified_name="demo.subtract",
+        test_qualified_name="tests.test_demo.test_subtract",
+        test_file_path="tests/test_demo.py",
+        test_line=8
+    )
+
+    index = Index(
+        entries=[add_test, subtract_test]
+    )
+
+    affected_tests = find_directly_affected_tests(
+        changed_symbol_qualified_names=["demo.add"],
+        test_index=index,
+    )
+
+    assert affected_tests == [add_test]
+
+def test_deduplicates_test_reached_by_multiple_symbols():
+    add_entry = IndexEntry(
+        source_qualified_name="demo.add",
+        test_qualified_name="tests.test_demo.test_add_and_format",
+        test_file_path="tests/test_demo.py",
+        test_line=3
+    )
+
+    format_entry = IndexEntry(
+        source_qualified_name="demo.format_result",
+        test_qualified_name="tests.test_demo.test_add_and_format",
+        test_file_path="tests/test_demo.py",
+        test_line=3
+    )
+
+    index = Index(
+        entries=[add_entry, format_entry]
+    )
+
+    affected_tests = find_directly_affected_tests(
+        changed_symbol_qualified_names=[
+            "demo.add",
+            "demo.format_result",
+        ],
+        test_index=index,
+    )
+
+    assert affected_tests == [add_entry]
+
+def test_find_symbols_in_changed_python_files(tmp_path):
+    """
+    期望的数据转换是：
+
+    changed_files["modified"]
+    → demo.py
+    → resolve_python_module_name(...)
+    → 模块名 demo
+    → analyze_python_symbols(...)
+    → demo.add
+    → demo.subtract
+    """
+    source_path = tmp_path / "demo.py"
+    source_path.write_text(
+        (
+            "def add(a, b):\n"
+            "    return a + b\n"
+            "\n"
+            "def subtract(a, b):\n"
+            "    return a - b\n"
+        ),
+        encoding="utf-8",
+    )
+
+    changed_files = {
+        "added": [],
+        "modified": ["demo.py"],
+        "deleted": [],
+    }
+
+    changed_symbol_names = (
+        find_changed_python_symbol_names(
+            project_root=str(tmp_path),
+            changed_files=changed_files,
+        )
+    )
+
+    assert changed_symbol_names == ["demo.add", "demo.subtract"]
+
+def test_finds_affected_tests_from_changed_files(tmp_path):
+    """
+    这个测试覆盖完整链路
+
+    demo.py 被修改
+    → 提取 demo.add
+    → 扫描 tests/test_demo.py
+    → 发现 test_add 调用了导入的 add
+    → 建立 demo.add → test_add 索引
+    → 返回 test_add
+
+    测试索引应扫描项目中的已有测试，而不是只扫描发生变化的测试文件
+    """
+    source_path = tmp_path / "demo.py"
+    source_path.write_text(
+        (
+            "def add(a, b):\n"
+            "    return a + b\n"
+        ),
+        encoding="utf-8",
+    )
+
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+
+    test_path = tests_path / "test_demo.py"
+    test_path.write_text(
+        (
+            "from demo import add\n"
+            "\n"
+            "def test_add():\n"
+            "    assert add(1, 2) == 3\n"
+        ),
+        encoding="utf-8",
+    )
+
+    affected_tests = find_affected_python_tests(
+        project_root=str(tmp_path),
+        changed_files = {
+            "added": [],
+            "modified": ["demo.py"],
+            "deleted": [],
+        }
+    )
+
+    assert affected_tests == [
+        IndexEntry(
+            source_qualified_name="demo.add",
+            test_qualified_name="tests.test_demo.test_add",
+            test_file_path="tests/test_demo.py",
+            test_line=3
+        )
+    ]

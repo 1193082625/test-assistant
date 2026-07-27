@@ -15,7 +15,7 @@ from core.analyzers.snapshot import Snapshot
 from core.executors import select_executor
 from core.executors.base import ExecutionReport
 from core.generators.test_generator import generate_tests_for_project
-
+from core.analyzers.impact import find_affected_python_tests
 
 class ProjectInfo(BaseModel):
     project_path: str # 项目目标路径
@@ -30,6 +30,7 @@ class GraphStates(TypedDict):
     execution_reports_by_file: dict[str, ExecutionReport]
     generated_tests: list[str] # 通过 解析文件 生成的测试代码
     pending_snapshots: list[Snapshot]
+    affected_test_files: list[str]
 
 # LangGraph 节点只接收一个参数 -- state，多出来的参数没法传进去
 @traceable(name="detect_change")
@@ -62,6 +63,40 @@ def detect_change_node(state: GraphStates) -> dict:
         # 同于确保检测到文件变化后，后面任何中间步骤失败，磁盘上的旧基线都保持不变，下一次运行仍能检测到这些变化。这与数据库事务“全部成功才提交”的思想相似。
         "pending_snapshots": new_snapshots,
         "messages": "增量检查修改内容"
+    }
+
+@traceable(name="analyze_impact")
+def analyze_impact_node(state: GraphStates) -> dict:
+    """把源码文件变更映射为直接受影响的测试文件"""
+    project_info = state["project_info"]
+    project_config = project_info.config["project"]
+    language = project_config.get("language")
+
+    if language != "python":
+        return {
+            "affected_test_files": [],
+            "messages": (
+                f"暂不支持 {language or 'unknown'} "
+                "项目的符号级影响分析"
+            )
+        }
+
+    affected_tests = find_affected_python_tests(
+        project_root = project_info.project_path,
+        changed_files=state["changed_files"],
+    )
+
+    affected_test_files = sorted({
+        entry.test_file_path
+        for entry in affected_tests
+    })
+
+    return {
+        "affected_test_files": affected_test_files,
+        "messages": (
+            f"找到 {len(affected_test_files)} 个"
+            "直接受影响的测试文件"
+        )
     }
 
 @traceable(name="commit_snapshot")
@@ -148,29 +183,72 @@ def run_affected_node(state: GraphStates):
         }
 
     execution_reports_by_file = {}
-    test_cases_dir = os.path.join(project_path, ".autotest", "test_cases")
+
+    test_files_to_execute: set[str] = set()
+
+    for test_file in state.get(
+            "affected_test_files",
+            [],
+    ):
+        if os.path.isabs(test_file):
+            file_path = test_file
+        else:
+            file_path = os.path.join(
+                project_path,
+                test_file,
+            )
+
+        test_files_to_execute.add(file_path)
+
+    test_cases_dir = os.path.join(
+        project_path,
+        ".autotest",
+        "test_cases",
+    )
+
     if os.path.isdir(test_cases_dir):
         for root, dirs, files in os.walk(test_cases_dir):
-            for file in files:
+            dirs.sort()
+
+            for file in sorted(files):
                 file_path = os.path.join(root, file)
+
                 if executor.can_handle(file_path):
-                    print(f"  → 执行测试: {os.path.basename(file_path)}...", end="", flush=True)
-                    report = executor.execute(file_path)
-                    all_results.extend(report.test_results)
-                    execution_reports_by_file[file_path] = report
+                    test_files_to_execute.add(file_path)
 
-                    # 普通测试断言失败会在下面通过具体的 TestResult 收集，所以这里排除 test_failure
-                    if (report.error_type is not None) and (report.error_type != "test_failure"):
-                        detail = (
-                            report.stderr
-                            or report.stdout
-                            or "未知执行错误"
-                        )
+    for file_path in sorted(test_files_to_execute):
+        if not executor.can_handle(file_path):
+            continue
 
-                        execution_errors.append(
-                            f"{os.path.basename(file_path)}: "
-                            f"{report.error_type}: {detail}"
-                        )
+        print(
+            (
+                "  → 执行测试: "
+                f"{os.path.basename(file_path)}..."
+            ),
+            end="",
+            flush=True,
+        )
+
+        report = executor.execute(file_path)
+        all_results.extend(report.test_results)
+        execution_reports_by_file[file_path] = report
+
+        if (
+                report.error_type is not None
+                and report.error_type != "test_failure"
+        ):
+            detail = (
+                    report.stderr
+                    or report.stdout
+                    or "未知执行错误"
+            )
+
+            execution_errors.append(
+                (
+                    f"{os.path.basename(file_path)}: "
+                    f"{report.error_type}: {detail}"
+                )
+            )
 
     # 统计
     passed = sum(1 for r in all_results if r.status == "passed")

@@ -1,4 +1,6 @@
 import json
+import sys
+from pathlib import Path
 
 from core.analyzers.snapshot import (
     SnapshotManifest,
@@ -11,8 +13,15 @@ from core.analyzers.snapshot import (
 from core.executors import PytestExecutor
 from core.executors.base import ExecutionReport, TestResult as ExecutionTestResult
 
-from core.graphs.run_graph import ProjectInfo, detect_change_node, commit_snapshot_node, router, run_affected_node, \
+from core.graphs.run_graph import (
+    ProjectInfo,
+    analyze_impact_node,
+    detect_change_node,
+    commit_snapshot_node,
+    router,
+    run_affected_node,
     run_graph
+)
 
 
 def test_detect_change_reads_versioned_snapshot_manifest(tmp_path):
@@ -502,3 +511,114 @@ def test_run_affected_rejects_language_framework_mismatch(tmp_path):
         "execution_reports_by_file": {},
         "errors": [reason],
     }
+
+def test_analyze_impact_node_selects_test_files(tmp_path):
+    source_path = tmp_path / "demo.py"
+    source_path.write_text(
+        (
+            "def add(a, b):\n"
+            "    return a + b\n"
+        ),
+        encoding="utf-8",
+    )
+
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+
+    (tests_path / "test_demo.py").write_text(
+        (
+            "from demo import add\n"
+            "\n"
+            "def test_add():\n"
+            "    assert add(1, 2) == 3\n"
+        ),
+        encoding="utf-8",
+    )
+
+    state = {
+        "changed_files": {
+            "added": [],
+            "modified": ["demo.py"],
+            "deleted": [],
+        },
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "language": "python",
+                    "test_frameworks": ["pytest"],
+                }
+            }
+        )
+    }
+
+    result = analyze_impact_node(state)
+
+    assert result == {
+        "affected_test_files": [
+            "tests/test_demo.py",
+        ],
+        "messages": "找到 1 个直接受影响的测试文件",
+    }
+
+def test_run_affected_executes_only_selected_files(
+        tmp_path,
+        monkeypatch,
+):
+    """测试 run_affected 不再遍历整个测试目录"""
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+
+    selected_test = tests_path / "test_add.py"
+    selected_test.write_text(
+        "def test_add(): pass\n",
+        encoding="utf-8",
+    )
+
+    unrelated_test = tests_path / "test_subtract.py"
+    unrelated_test.write_text(
+        "def test_subtract(): pass\n",
+        encoding="utf-8",
+    )
+
+    executed_files: list[str] = []
+
+    def fake_execute(self, file_path):
+        executed_files.append(file_path)
+        return  ExecutionReport(
+            test_results=[],
+            stdout="",
+            stderr="",
+            exit_code=0,
+            error_type=None,
+        )
+
+    monkeypatch.setattr(
+        PytestExecutor,
+        "execute",
+        fake_execute,
+    )
+
+    state = {
+        "changed_files": {
+            "added": [],
+            "modified": ["demo.py"],
+            "deleted": [],
+        },
+        "affected_test_files": [
+            "tests/test_add.py",
+        ],
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "language": "python",
+                    "test_frameworks": ["pytest"],
+                }
+            }
+        )
+    }
+
+    run_affected_node(state)
+
+    assert executed_files == [str(selected_test)]

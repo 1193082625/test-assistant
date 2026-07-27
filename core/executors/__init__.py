@@ -42,8 +42,9 @@ def select_executor(
 
     if language is not None:
         language_name = language.lower()
-        supported_languages = (
-            EXECUTOR_LANGUAGES.get(language_name, frozenset()),
+        supported_languages = EXECUTOR_LANGUAGES.get(
+            framework_name,
+            frozenset(),
         )
 
         if language_name not in supported_languages:
@@ -54,7 +55,7 @@ def select_executor(
                     "不支持的执行器组合: "
                     f"language={language_name}, "
                     f"framework={framework_name}"
-                )
+                ),
             )
 
     return ExecutorSelection(
