@@ -88,7 +88,25 @@ def _find_python_test_files(
 
     return sorted(test_files)
 
-def _find_changed_python_symbols(
+def _is_formal_python_test_file(
+    relative_path: str,
+) -> bool:
+    """判断路径是否属于正式 pytest 测试文件。"""
+    path = Path(relative_path)
+    directory_parts = path.parts[:-1]
+
+    return (
+        any(
+            part in {"test", "tests"}
+            for part in directory_parts
+        )
+        and (
+            path.name.startswith("test_")
+            or path.name.endswith("_test.py")
+        )
+    )
+
+def find_changed_python_symbols(
         project_root: str,
         changed_files: dict[str, list[str]],
 ) -> list[SourceSymbol]:
@@ -101,6 +119,11 @@ def _find_changed_python_symbols(
             changed_files.get(change_type, []),
         ):
             if not relative_path.endswith(".py"):
+                continue
+
+            if _is_formal_python_test_file(
+                    relative_path
+            ):
                 continue
 
             source_path = root_path / relative_path
@@ -128,7 +151,7 @@ def find_changed_python_symbol_names(
     """提取新增和修改的 python 文件中的源码符号限定名"""
     return [
         symbol.qualified_name
-        for symbol in _find_changed_python_symbols(
+        for symbol in find_changed_python_symbols(
             project_root=project_root,
             changed_files=changed_files,
         )
@@ -140,7 +163,7 @@ def find_affected_python_tests(
 ) -> list[TestIndexEntry]:
     """根据文件变更查找直接受影响的 pytest 测试。"""
 
-    changed_symbols = _find_changed_python_symbols(
+    changed_symbols = find_changed_python_symbols(
         project_root=project_root,
         changed_files=changed_files,
     )
@@ -216,6 +239,50 @@ def select_tests_for_changes(
             ],
         )
 
+    changed_test_files = sorted({
+        relative_path
+        for change_type in ("added", "modified")
+        for relative_path in changed_files.get(
+            change_type,
+            [],
+        )
+        if _is_formal_python_test_file(
+            relative_path
+        )
+    })
+
+    changed_python_source_files = sorted({
+        relative_path
+        for change_type in ("added", "modified")
+        for relative_path in changed_files.get(
+            change_type,
+            [],
+        )
+        if (
+                relative_path.endswith(".py")
+                and not _is_formal_python_test_file(
+            relative_path
+        )
+        )
+    })
+
+    if (
+            changed_test_files
+            and not changed_python_source_files
+    ):
+        return TestSelection(
+            mode=TestSelectionMode.DIRECT,
+            test_files=changed_test_files,
+            evidence=[
+                (
+                    "Changed pytest test file: "
+                    f"{test_file}"
+                )
+                for test_file in changed_test_files
+            ],
+            warnings=[],
+        )
+
     deleted_python_files = sorted(
         relative_path
         for relative_path in changed_files.get("deleted", [])
@@ -249,7 +316,7 @@ def select_tests_for_changes(
     )
 
     try:
-        changed_symbols = _find_changed_python_symbols(
+        changed_symbols = find_changed_python_symbols(
             project_root=project_root,
             changed_files=changed_files,
         )
@@ -299,15 +366,28 @@ def select_tests_for_changes(
             for symbol in changed_symbols
         )
 
-        return TestSelection(
-            mode=TestSelectionMode.NONE,
-            test_files=[],
-            evidence=[
+        evidence = [
+            *(
                 (
-                    "Changed Python symbols: "
-                    f"{changed_symbol_names}"
-                ),
-            ],
+                    "Changed pytest test file: "
+                    f"{test_file}"
+                )
+                for test_file in changed_test_files
+            ),
+            (
+                "Changed Python symbols: "
+                f"{changed_symbol_names}"
+            ),
+        ]
+
+        return TestSelection(
+            mode=(
+                TestSelectionMode.DIRECT
+                if changed_test_files
+                else TestSelectionMode.NONE
+            ),
+            test_files=changed_test_files,
+            evidence=evidence,
             warnings=[
                 (
                     "No existing tests directly map to "
@@ -318,18 +398,30 @@ def select_tests_for_changes(
         )
 
     test_files = sorted({
-        entry.test_file_path
-        for entry in affected_tests
+        *changed_test_files,
+        *(
+            entry.test_file_path
+            for entry in affected_tests
+        ),
     })
 
     evidence = [
-        (
-            f"{entry.source_qualified_name} -> "
-            f"{entry.test_qualified_name} "
-            f"at {entry.test_file_path}:"
-            f"{entry.test_line}"
-        )
-        for entry in affected_tests
+        *(
+            (
+                "Changed pytest test file: "
+                f"{test_file}"
+            )
+            for test_file in changed_test_files
+        ),
+        *(
+            (
+                f"{entry.source_qualified_name} -> "
+                f"{entry.test_qualified_name} "
+                f"at {entry.test_file_path}:"
+                f"{entry.test_line}"
+            )
+            for entry in affected_tests
+        ),
     ]
 
     return TestSelection(

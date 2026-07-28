@@ -276,3 +276,13 @@ def test_commit_snapshot_failure_preserves_old_baseline(tmp_path, monkeypatch):
     assert snapshot_path.read_text(encoding="utf-8") == old_content
     # 验证失败后没有遗留临时文件
     assert list(tmp_path.glob(".snapshot.json.*.tmp")) == []
+
+def test_snapshot_manifest_rejects_legacy_list_format():
+    """旧列表格式应返回明确错误，而不是 AttributeError"""
+    with pytest.raises(
+        ValueError,
+        match=(
+            "快照格式无效: 根节点必须是映射"
+        )
+    ):
+        SnapshotManifest.from_dict([])

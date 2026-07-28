@@ -532,3 +532,136 @@ def test_returns_unsupported_for_missing_language(tmp_path):
             ),
         ]
     )
+
+def test_selects_modified_test_file_itself(tmp_path):
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+
+    (tests_path / "test_demo.py").write_text(
+        "def test_demo(): pass\n",
+        encoding="utf-8",
+    )
+
+    selection = select_tests_for_changes(
+        project_root=str(tmp_path),
+        language="python",
+        changed_files={
+            "added": [],
+            "modified": ["tests/test_demo.py"],
+            "deleted": [],
+        },
+    )
+
+    assert selection.mode is SelectionMode.DIRECT
+    assert selection.test_files == [
+        "tests/test_demo.py",
+    ]
+    assert selection.evidence == [
+        "Changed pytest test file: tests/test_demo.py",
+    ]
+    assert selection.warnings == []
+
+def test_merges_changed_tests_with_source_affected_tests(
+    tmp_path,
+):
+    source_path = tmp_path / "demo.py"
+    source_path.write_text(
+        (
+            "def add(a, b):\n"
+            "    return a + b\n"
+        ),
+        encoding="utf-8",
+    )
+
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+
+    (tests_path / "test_demo.py").write_text(
+        (
+            "from demo import add\n"
+            "\n"
+            "def test_add():\n"
+            "    assert add(1, 2) == 3\n"
+        ),
+        encoding="utf-8",
+    )
+
+    (tests_path / "test_manual.py").write_text(
+        "def test_manual(): pass\n",
+        encoding="utf-8",
+    )
+
+    selection = select_tests_for_changes(
+        project_root=str(tmp_path),
+        language="python",
+        changed_files={
+            "added": [],
+            "modified": [
+                "demo.py",
+                "tests/test_manual.py",
+            ],
+            "deleted": [],
+        },
+    )
+
+    assert selection.mode is SelectionMode.DIRECT
+    assert selection.test_files == [
+        "tests/test_demo.py",
+        "tests/test_manual.py",
+    ]
+    assert (
+        "Changed pytest test file: "
+        "tests/test_manual.py"
+    ) in selection.evidence
+
+def test_runs_changed_test_when_source_has_no_mapping(
+    tmp_path,
+):
+    source_path = tmp_path / "orphan.py"
+    source_path.write_text(
+        (
+            "def calculate():\n"
+            "    return 42\n"
+        ),
+        encoding="utf-8",
+    )
+
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+    (tests_path / "test_manual.py").write_text(
+        "def test_manual(): pass\n",
+        encoding="utf-8",
+    )
+
+    selection = select_tests_for_changes(
+        project_root=str(tmp_path),
+        language="python",
+        changed_files={
+            "added": [],
+            "modified": [
+                "orphan.py",
+                "tests/test_manual.py",
+            ],
+            "deleted": [],
+        },
+    )
+
+    assert selection.mode is SelectionMode.DIRECT
+    assert selection.test_files == [
+        "tests/test_manual.py",
+    ]
+    assert (
+        "Changed pytest test file: "
+        "tests/test_manual.py"
+    ) in selection.evidence
+    assert (
+        "Changed Python symbols: "
+        "orphan.calculate"
+    ) in selection.evidence
+    assert selection.warnings == [
+        (
+            "No existing tests directly map to "
+            "the changed symbols; create a "
+            "TestSpec before generating tests"
+        )
+    ]

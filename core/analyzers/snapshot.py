@@ -98,6 +98,11 @@ class SnapshotManifest:
         从 JSON 读取结果恢复快照模型
         把普通字典重新转换成 SnapshotManifest 对象
         """
+        if not isinstance(data, dict):
+            raise ValueError(
+                "快照格式无效: 根节点必须是映射"
+            )
+
         version = data.get("version")
 
         if version != SNAPSHOT_FORMAT_VERSION:
