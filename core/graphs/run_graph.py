@@ -14,8 +14,9 @@ from pydantic import BaseModel
 from core.analyzers.snapshot import Snapshot
 from core.executors import select_executor
 from core.executors.base import ExecutionReport
-from core.generators.test_generator import generate_tests_for_project
-from core.analyzers.impact import find_affected_python_tests
+from core.analyzers.impact import select_tests_for_changes
+from core.models import TestSelection, TestSelectionMode
+
 
 class ProjectInfo(BaseModel):
     project_path: str # 项目目标路径
@@ -28,9 +29,8 @@ class GraphStates(TypedDict):
     project_info: ProjectInfo
     changed_files: dict # detect的输出 -> run 的输入
     execution_reports_by_file: dict[str, ExecutionReport]
-    generated_tests: list[str] # 通过 解析文件 生成的测试代码
     pending_snapshots: list[Snapshot]
-    affected_test_files: list[str]
+    test_selection: TestSelection
 
 # LangGraph 节点只接收一个参数 -- state，多出来的参数没法传进去
 @traceable(name="detect_change")
@@ -67,35 +67,21 @@ def detect_change_node(state: GraphStates) -> dict:
 
 @traceable(name="analyze_impact")
 def analyze_impact_node(state: GraphStates) -> dict:
-    """把源码文件变更映射为直接受影响的测试文件"""
+    """为当前项目变更生成结构化测试选择结果"""
     project_info = state["project_info"]
     project_config = project_info.config["project"]
-    language = project_config.get("language")
 
-    if language != "python":
-        return {
-            "affected_test_files": [],
-            "messages": (
-                f"暂不支持 {language or 'unknown'} "
-                "项目的符号级影响分析"
-            )
-        }
-
-    affected_tests = find_affected_python_tests(
-        project_root = project_info.project_path,
+    selection = select_tests_for_changes(
+        project_root=project_info.project_path,
+        language=project_config.get("language", "unknown"),
         changed_files=state["changed_files"],
     )
 
-    affected_test_files = sorted({
-        entry.test_file_path
-        for entry in affected_tests
-    })
-
     return {
-        "affected_test_files": affected_test_files,
+        "test_selection": selection,
         "messages": (
-            f"找到 {len(affected_test_files)} 个"
-            "直接受影响的测试文件"
+            f"测试选择模式: {selection.mode.value}，"
+            f"{len(selection.test_files)} 个测试文件"
         )
     }
 
@@ -139,10 +125,11 @@ def run_affected_node(state: GraphStates):
 
     # 没有测试框架 -> 跳过执行
     if not test_frameworks:
+        reason = "未检测到测试框架，无法执行选中的测试"
         return {
-            "messages": "⚠ 未检测到测试框架，跳过执行",
+            "messages": f"⚠ {reason}",
             "execution_reports_by_file": {},
-            "errors": [],
+            "errors": [reason],
         }
 
     project_path = state["project_info"].project_path
@@ -186,10 +173,10 @@ def run_affected_node(state: GraphStates):
 
     test_files_to_execute: set[str] = set()
 
-    for test_file in state.get(
-            "affected_test_files",
-            [],
-    ):
+    test_selection = state["test_selection"]
+    selected_test_files = test_selection.test_files
+
+    for test_file in selected_test_files:
         if os.path.isabs(test_file):
             file_path = test_file
         else:
@@ -199,22 +186,6 @@ def run_affected_node(state: GraphStates):
             )
 
         test_files_to_execute.add(file_path)
-
-    test_cases_dir = os.path.join(
-        project_path,
-        ".autotest",
-        "test_cases",
-    )
-
-    if os.path.isdir(test_cases_dir):
-        for root, dirs, files in os.walk(test_cases_dir):
-            dirs.sort()
-
-            for file in sorted(files):
-                file_path = os.path.join(root, file)
-
-                if executor.can_handle(file_path):
-                    test_files_to_execute.add(file_path)
 
     for file_path in sorted(test_files_to_execute):
         if not executor.can_handle(file_path):
@@ -250,6 +221,17 @@ def run_affected_node(state: GraphStates):
                 )
             )
 
+    if not execution_reports_by_file:
+        reason = (
+            "没有选中的测试文件可由 "
+            f"{framework} 执行"
+        )
+        return {
+            "messages": f"⚠ {reason}",
+            "execution_reports_by_file": {},
+            "errors": [reason],
+        }
+
     # 统计
     passed = sum(1 for r in all_results if r.status == "passed")
     failed = [r for r in all_results if r.status == "failed"]
@@ -268,23 +250,33 @@ def run_affected_node(state: GraphStates):
         "errors": errors,
     }
 
-@traceable(name="generate_tests")
-def generate_tests_node(state: GraphStates) -> dict:
-    changed_files = state["changed_files"]
-    if not any(changed_files.values()):
-        return {"messages": "无变更，跳过测试生成"}
+def route_after_impact(
+        state: GraphStates,
+) -> str:
+    """根据结构化测试选择决定影响分析后的流程"""
+    selection = state["test_selection"]
+    # 有明确测试目标 可以执行
+    executable_modes = {
+        TestSelectionMode.DIRECT,
+        TestSelectionMode.MODULE,
+        TestSelectionMode.FULL,
+    }
 
-    generated = generate_tests_for_project(
-        state["project_info"].project_path,
-        changed_files,
-    )
+    if (
+        selection.mode in executable_modes
+        and selection.test_files
+    ):
+        return "run"
 
-    if generated:
-        msg = f"生成 {len(generated)} 个测试文件"
-    else:
-        msg = "无需生成测试（无可测函数）"
+    # 没有有效源码变化，可以提交新快照
+    if (
+        selection.mode is TestSelectionMode.NONE
+        and not selection.warnings
+    ):
+        return "commit"
 
-    return {"generated_tests": generated, "messages": msg}
+    # 当前不支持，不能伪装成功
+    return "end"
 
 def router(state: GraphStates):
     """根据执行结果决定提交、重试或结束"""
@@ -298,7 +290,7 @@ def run_graph(target_path: str):
     graph_builder = StateGraph(GraphStates)
     # 添加节点
     graph_builder.add_node("detect_change_node", detect_change_node)
-    graph_builder.add_node("generate_tests_node", generate_tests_node)
+    graph_builder.add_node("analyze_impact_node", analyze_impact_node)
     graph_builder.add_node("run_affected_node", run_affected_node)
     graph_builder.add_node("commit_snapshot_node", commit_snapshot_node)
 
@@ -306,8 +298,16 @@ def run_graph(target_path: str):
     graph_builder.set_entry_point("detect_change_node")
 
     # 添加边
-    graph_builder.add_edge("detect_change_node", "generate_tests_node")
-    graph_builder.add_edge("generate_tests_node", "run_affected_node")
+    graph_builder.add_edge("detect_change_node", "analyze_impact_node")
+    graph_builder.add_conditional_edges(
+        "analyze_impact_node",
+        route_after_impact,
+        {
+            "run": "run_affected_node",
+            "commit": "commit_snapshot_node",
+            "end": END,
+        },
+    )
     graph_builder.add_conditional_edges(
         "run_affected_node",
         router,
@@ -334,7 +334,9 @@ def run_graph(target_path: str):
         ),
         "execution_reports_by_file": {},
         "changed_files": [],
-        "generated_tests": [],
-        "pending_snapshots": []
+        "pending_snapshots": [],
+        "test_selection": TestSelection(
+            mode=TestSelectionMode.NONE
+        )
     })
     return result

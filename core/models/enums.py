@@ -48,3 +48,10 @@ class EvidenceStrength(StrEnum):
     STRONG="strong"
     MEDIUM="medium"
     WEAK="weak"
+
+class TestSelectionMode(StrEnum):
+    DIRECT="direct"
+    MODULE="module"
+    FULL="full"
+    NONE="none"
+    UNSUPPORTED="unsupported"

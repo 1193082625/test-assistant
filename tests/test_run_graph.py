@@ -1,6 +1,6 @@
 import json
-import sys
-from pathlib import Path
+
+import pytest
 
 from core.analyzers.snapshot import (
     SnapshotManifest,
@@ -12,7 +12,10 @@ from core.analyzers.snapshot import (
 )
 from core.executors import PytestExecutor
 from core.executors.base import ExecutionReport, TestResult as ExecutionTestResult
-
+from core.models import (
+    TestSelection as Selection,
+    TestSelectionMode as SelectionMode,
+)
 from core.graphs.run_graph import (
     ProjectInfo,
     analyze_impact_node,
@@ -20,7 +23,8 @@ from core.graphs.run_graph import (
     commit_snapshot_node,
     router,
     run_affected_node,
-    run_graph
+    run_graph,
+    route_after_impact
 )
 
 
@@ -225,30 +229,71 @@ def test_run_affected_returns_explainable_unsupported_framework(tmp_path):
         "errors": ["不支持的测试框架: jest"],
     }
 
-def test_run_affected_selects_first_supported_framework(tmp_path):
+def test_run_affected_selects_first_supported_framework(
+    tmp_path,
+    monkeypatch,
+):
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text(
+        "def test_demo(): pass\n",
+        encoding="utf-8",
+    )
+
+    executed_files: list[str] = []
+
+    def fake_execute(self, file_path):
+        executed_files.append(file_path)
+        return ExecutionReport(
+            test_results=[],
+            stdout="",
+            stderr="",
+            exit_code=0,
+            error_type=None,
+        )
+
+    monkeypatch.setattr(
+        PytestExecutor,
+        "execute",
+        fake_execute,
+    )
+
     state = {
         "changed_files": {
             "added": ["src/app.js"],
             "deleted": [],
             "modified": [],
         },
+        "test_selection": Selection(
+            mode=SelectionMode.DIRECT,
+            test_files=[
+                str(test_file),
+            ],
+        ),
         "project_info": ProjectInfo(
             project_path=str(tmp_path),
             config={
                 "project": {
-                    "test_frameworks": ["jest", "pytest"]
+                    "test_frameworks": [
+                        "jest",
+                        "pytest",
+                    ],
                 }
-            }
-        )
+            },
+        ),
     }
 
     result = run_affected_node(state)
 
-    assert result == {
-        "messages": "执行结果：0 passed, 0 failed, 0 execution errors",
-        "execution_reports_by_file": {},
-        "errors": [],
-    }
+    assert executed_files == [
+        str(test_file),
+    ]
+    assert result["errors"] == []
+    assert (
+            result["execution_reports_by_file"][
+                str(test_file)
+            ].exit_code
+            == 0
+    )
 
 def test_run_affected_consumes_execution_report(tmp_path, monkeypatch):
     """Graph 不仅要保存单条用例结果，还要保存每个文件的完整执行报告，包括退出码喝原始输出"""
@@ -287,6 +332,12 @@ def test_run_affected_consumes_execution_report(tmp_path, monkeypatch):
             "deleted": [],
             "modified": [],
         },
+        "test_selection": Selection(
+            mode=SelectionMode.DIRECT,
+            test_files=[str(test_file)],
+            evidence=["Explicit test selection for report test"],
+            warnings=[]
+        ),
         "project_info": ProjectInfo(
             project_path=str(tmp_path),
             config={
@@ -294,7 +345,7 @@ def test_run_affected_consumes_execution_report(tmp_path, monkeypatch):
                     "test_frameworks": ["pytest"]
                 }
             }
-        )
+        ),
     }
 
     result = run_affected_node(state)
@@ -333,6 +384,12 @@ def test_run_affected_propagates_runner_error(tmp_path, monkeypatch):
             "deleted": [],
             "modified": [],
         },
+        "test_selection": Selection(
+            mode=SelectionMode.DIRECT,
+            test_files=[str(test_file)],
+            evidence=["Explicit test selection for runner error test"],
+            warnings=[]
+        ),
         "project_info": ProjectInfo(
             project_path=str(tmp_path),
             config={
@@ -357,21 +414,41 @@ def test_run_affected_propagates_runner_error(tmp_path, monkeypatch):
     )
 
 def test_run_graph_failure_does_not_commit_snapshot(tmp_path, monkeypatch):
-    app_path = (tmp_path / "app.py")
-    app_path.write_text("value = 1", encoding="utf-8")
+    app_path = tmp_path / "app.py"
+    app_path.write_text(
+        (
+            "def value():\n"
+            "    return 1\n"
+        ),
+        encoding="utf-8",
+    )
+
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+
+    test_file = tests_path / "test_app.py"
+    test_file.write_text(
+        (
+            "from app import value\n"
+            "\n"
+            "def test_value():\n"
+            "    assert value() == 1\n"
+        ),
+        encoding="utf-8",
+    )
 
     old_snapshots, skipped = take_snapshot(
         str(tmp_path),
         excludes=[".autotest"],
     )
-
     assert skipped == 0
 
     autotest_path = tmp_path / ".autotest"
-    test_cases_path = autotest_path / "test_cases"
-    test_cases_path.mkdir(parents=True)
+    autotest_path.mkdir()
 
-    snapshot_path = autotest_path / "snapshot.json"
+    snapshot_path = (
+            autotest_path / "snapshot.json"
+    )
     commit_snapshot_manifest(
         str(snapshot_path),
         old_snapshots,
@@ -380,53 +457,62 @@ def test_run_graph_failure_does_not_commit_snapshot(tmp_path, monkeypatch):
     (autotest_path / "config.yml").write_text(
         (
             "project:\n"
+            "  language: python\n"
             "  test_frameworks:\n"
             "    - pytest\n"
         ),
         encoding="utf-8",
     )
 
-    (test_cases_path / "test_demo.py").write_text(
-        "def test_demo(): pass",
+    # 建立旧基线后修改源码函数。
+    app_path.write_text(
+        (
+            "def value():\n"
+            "    return 2\n"
+        ),
         encoding="utf-8",
     )
 
-    # 建立旧基线后修改项目文件
-    app_path.write_text("value = 2", encoding="utf-8")
-
-    def fake_generate(*args, **kwargs):
-        return []
-
     def fake_execute(self, file_path):
         return ExecutionReport(
-            test_results = [],
+            test_results=[],
             stdout="",
             stderr="pytest startup failed",
             exit_code=None,
             error_type="startup_error",
         )
 
-    monkeypatch.setattr("core.graphs.run_graph.generate_tests_for_project", fake_generate)
-    monkeypatch.setattr(PytestExecutor, "execute", fake_execute)
+    monkeypatch.setattr(
+        PytestExecutor,
+        "execute",
+        fake_execute,
+    )
 
     result = run_graph(str(tmp_path))
 
-    stored_manifest = read_snapshot_manifest(str(snapshot_path))
+    stored_manifest = read_snapshot_manifest(
+        str(snapshot_path)
+    )
 
     current_snapshots, _ = take_snapshot(
         str(tmp_path),
         excludes=[".autotest"],
     )
 
-    remaining_changes = compare_snapshots(stored_manifest.files, current_snapshots)
+    remaining_changes = compare_snapshots(
+        stored_manifest.files,
+        current_snapshots,
+    )
 
     assert result["errors"] == [
         (
-            "test_demo.py: startup_error: "
+            "test_app.py: startup_error: "
             "pytest startup failed"
         )
     ]
-    assert remaining_changes["modified"] == ["app.py"]
+    assert remaining_changes["modified"] == [
+        "app.py",
+    ]
 
 def test_run_graph_success_reaches_commit_once(tmp_path, monkeypatch):
     app_path = (tmp_path / "app.py")
@@ -442,6 +528,7 @@ def test_run_graph_success_reaches_commit_once(tmp_path, monkeypatch):
     (autotest_path / "config.yml").write_text(
         (
             "project:\n"
+            "  language: python\n"
             "  test_frameworks:\n"
             "    - pytest\n"
         ),
@@ -455,9 +542,6 @@ def test_run_graph_success_reaches_commit_once(tmp_path, monkeypatch):
         "def test_demo(): pass",
         encoding="utf-8",
     )
-    def forbidden_generate(*args, **kwargs):
-        raise AssertionError("无文件变化时不应调用测试生成器")
-
     def forbidden_execute(self, file_path):
         raise AssertionError("无文件变化时不应调用测试执行器")
 
@@ -469,7 +553,6 @@ def test_run_graph_success_reaches_commit_once(tmp_path, monkeypatch):
         }
 
     monkeypatch.setattr("core.graphs.run_graph.commit_snapshot_node", fake_commit)
-    monkeypatch.setattr("core.graphs.run_graph.generate_tests_for_project", forbidden_generate)
     monkeypatch.setattr(PytestExecutor, "execute", forbidden_execute)
 
     result = run_graph(str(tmp_path))
@@ -555,10 +638,24 @@ def test_analyze_impact_node_selects_test_files(tmp_path):
     result = analyze_impact_node(state)
 
     assert result == {
-        "affected_test_files": [
-            "tests/test_demo.py",
-        ],
-        "messages": "找到 1 个直接受影响的测试文件",
+        "test_selection": Selection(
+            mode=SelectionMode.DIRECT,
+            test_files=[
+                "tests/test_demo.py",
+            ],
+            evidence=[
+                (
+                    "demo.add -> "
+                    "tests.test_demo.test_add "
+                    "at tests/test_demo.py:3"
+                )
+            ],
+            warnings=[]
+        ),
+        "messages": (
+            "测试选择模式: direct，"
+            "1 个测试文件"
+        )
     }
 
 def test_run_affected_executes_only_selected_files(
@@ -605,9 +702,18 @@ def test_run_affected_executes_only_selected_files(
             "modified": ["demo.py"],
             "deleted": [],
         },
-        "affected_test_files": [
-            "tests/test_add.py",
-        ],
+        "test_selection": Selection(
+            mode=SelectionMode.DIRECT,
+            test_files=["tests/test_add.py"],
+            evidence=[
+                (
+                    "demo.add -> "
+                    "tests.test_add.test_add "
+                    "at tests/test_add.py:1"
+                )
+            ],
+            warnings=[]
+        ),
         "project_info": ProjectInfo(
             project_path=str(tmp_path),
             config={
@@ -622,3 +728,306 @@ def test_run_affected_executes_only_selected_files(
     run_affected_node(state)
 
     assert executed_files == [str(selected_test)]
+
+def test_run_affected_does_not_scan_unselected_candidates(tmp_path, monkeypatch):
+    """用测试锁定 “执行节点不能饶过 TestSelection 扫描候选目录”"""
+
+    candidates_path = (
+        tmp_path
+        / ".autotest"
+        / "test_cases"
+    )
+    candidates_path.mkdir(parents=True)
+
+    unselected_test = (
+        candidates_path / "test_generated.py"
+    )
+    unselected_test.write_text(
+        "def test_generated(): pass\n",
+        encoding="utf-8",
+    )
+
+    executed_files: list[str] = []
+
+    def fake_execute(self, file_path):
+        executed_files.append(file_path)
+        return ExecutionReport(
+            test_results=[],
+            stdout="",
+            stderr="",
+            exit_code=0,
+            error_type=None,
+        )
+
+    monkeypatch.setattr(
+        PytestExecutor,
+        "execute",
+        fake_execute,
+    )
+
+    state = {
+        "changed_files": {
+            "added": [],
+            "modified": ["demo.py"],
+            "deleted": [],
+        },
+        "test_selection": Selection(
+            mode=SelectionMode.NONE,
+            test_files=[],
+            evidence=[
+                "Changed Python symbols: demo.add",
+            ],
+            warnings=[
+                (
+                    "No existing tests directly map "
+                    "to the changed symbols"
+                )
+            ]
+        ),
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "language": "python",
+                    "test_frameworks": ["pytest"],
+                }
+            }
+        )
+    }
+
+    run_affected_node(state)
+
+    assert executed_files == []
+
+def test_impact_router_stops_when_tests_need_spec():
+    """测试源码有变化但没有测试映射是，应结束当前流程并保留旧快照"""
+    state = {
+        "test_selection": Selection(
+            mode=SelectionMode.NONE,
+            test_files=[],
+            evidence=[
+                "Changed Python symbols: demo.add",
+            ],
+            warnings=[
+                (
+                    "No existing tests directly map "
+                    "to the changed symbols; create "
+                    "a TestSpec before generating tests"
+                )
+            ]
+        )
+    }
+
+    assert route_after_impact(state) == "end"
+
+def test_impact_router_runs_direct_selection():
+    state = {
+        "test_selection": Selection(
+            mode=SelectionMode.DIRECT,
+            test_files=["tests/test_demo.py"],
+        )
+    }
+
+    assert route_after_impact(state) == "run"
+
+def test_impact_router_commits_clean_none_selection():
+    state = {
+        "test_selection": Selection(
+            mode=SelectionMode.NONE,
+            test_files=[],
+            evidence=[
+                (
+                    "No added or modified Python "
+                    "source symbols were found"
+                ),
+            ],
+            warnings=[]
+        )
+    }
+
+    assert route_after_impact(state) == "commit"
+
+def test_impact_router_stops_unsupported_selection():
+    state = {
+        "test_selection": Selection(
+            mode=SelectionMode.UNSUPPORTED,
+            test_files=[],
+            evidence=[
+                "Requested language: javascript",
+            ],
+            warnings=[
+                (
+                    "Symbol-level impact analysis "
+                    "currently supports only Python"
+                )
+            ]
+        )
+    }
+
+    assert route_after_impact(state) == "end"
+
+def test_impact_router_stops_empty_full_selection():
+    """
+    源码被删除或分析失败
+    → 请求 FULL 降级
+    → 项目中却没有发现正式 pytest 文件
+
+    预期不能提交快照
+    """
+    state = {
+        "test_selection": Selection(
+            mode=SelectionMode.FULL,
+            test_files=[],
+            evidence=[
+                "Delected Python files: demo.py",
+            ],
+            warnings=[
+                (
+                    "Deleted files cannot be analyzed "
+                    "from current source; falling back "
+                    "to all pytest test files"
+                )
+            ]
+        )
+    }
+
+    assert route_after_impact(state) == "end"
+
+def test_run_affected_fails_when_no_test_framework(tmp_path):
+    """已选择测试但没有执行框架时，不能提交快照"""
+    state = {
+        "changed_files": {
+            "added": [],
+            "modified": ["demo.py"],
+            "deleted": [],
+        },
+        "test_selection": Selection(
+            mode=SelectionMode.DIRECT,
+            test_files=["tests/test_demo.py"],
+        ),
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "language": "python",
+                    "test_frameworks": [],
+                }
+            }
+        )
+    }
+
+    result = run_affected_node(state)
+
+    assert result["errors"] == [
+        "未检测到测试框架，无法执行选中的测试"
+    ]
+    assert router(result) == "end"
+
+def test_run_affected_requires_test_selection(tmp_path):
+    state = {
+        "changed_files": {
+            "added": [],
+            "modified": ["demo.py"],
+            "deleted": [],
+        },
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "language": "python",
+                    "test_frameworks": ["pytest"],
+                }
+            }
+        )
+    }
+
+    with pytest.raises(
+        KeyError,
+        match="test_selection"
+    ):
+        run_affected_node(state)
+
+def test_run_affected_fails_when_no_selected_file_can_execute(tmp_path, monkeypatch):
+    """选中的测试全部无法执行时，不能提交快照"""
+    selected_test = tmp_path / "tests" / "test_demo.py"
+    selected_test.parent.mkdir()
+    selected_test.write_text(
+        "def test_demo(): pass\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        PytestExecutor,
+        "can_handle",
+        lambda self, file_path: False,
+    )
+
+    state = {
+        "changed_files": {
+            "added": [],
+            "modified": ["demo.py"],
+            "deleted": [],
+        },
+        "test_selection": Selection(
+            mode=SelectionMode.DIRECT,
+            test_files=["tests/test_demo.py"],
+        ),
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={
+                "project": {
+                    "language": "python",
+                    "test_frameworks": ["pytest"],
+                }
+            }
+        )
+    }
+
+    result = run_affected_node(state)
+
+    assert result["execution_reports_by_file"] == {}
+    assert result["errors"] == [
+        "没有选中的测试文件可由 pytest 执行"
+    ]
+    assert router(result) == "end"
+
+def test_detect_change_ignores_history_directory(tmp_path):
+    app_path = tmp_path / "app.py"
+    app_path.write_text(
+        "value = 1\n",
+        encoding="utf-8",
+    )
+    snapshots, skipped = take_snapshot(
+        str(tmp_path),
+        excludes=[".autotest"]
+    )
+    assert skipped == 0
+
+    autotest_path = tmp_path / ".autotest"
+    autotest_path.mkdir()
+
+    commit_snapshot_manifest(
+        str(autotest_path / "snapshot.json"),
+        snapshots,
+    )
+
+    history_path = tmp_path / ".history"
+    history_path.mkdir()
+    (history_path / "old.py").write_text(
+        "value = 0\n",
+        encoding="utf-8",
+    )
+
+    state = {
+        "project_info": ProjectInfo(
+            project_path=str(tmp_path),
+            config={"project": {}}
+        )
+    }
+
+    result = detect_change_node(state)
+    assert result["changed_files"] == {
+        "added": [],
+        "modified": [],
+        "deleted": [],
+    }

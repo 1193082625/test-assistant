@@ -175,13 +175,6 @@ def run(path):
 
     result = run_graph(project_path)
 
-    # 测试生成结果
-    generated = result.get("generated_tests", [])
-    if generated:
-        click.echo(f"→ 生成测试： {len(generated)} 个测试文件")
-        for f in generated:
-            click.echo(f" ✓ {os.path.relpath(f, project_path)}")
-
     # 变更检测输出
     changed_files = result["changed_files"]
     if any(changed_files.values()): # 有任何变更

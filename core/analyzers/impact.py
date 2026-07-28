@@ -3,7 +3,7 @@ from pathlib import Path
 from core.models import (
     SourceSymbol,
     TestIndex,
-    TestIndexEntry
+    TestIndexEntry, TestSelection, TestSelectionMode
 )
 from core.analyzers.source import (
     analyze_python_symbols,
@@ -37,6 +37,56 @@ def find_directly_affected_tests(
             affected_tests.append(entry)
 
     return affected_tests
+
+def _find_python_test_files(
+    project_root: str,
+) -> list[str]:
+    """查找正式测试目录中的 pytest 文件。"""
+
+    from core.analyzers.framework import EXCLUDE_DIRS
+
+    root_path = Path(project_root).resolve()
+
+    excluded_dirs = set(EXCLUDE_DIRS)
+    test_dir_names = {
+        "test",
+        "tests",
+    }
+
+    test_files: list[str] = []
+
+    for path in root_path.rglob("*.py"):
+        relative_path = path.relative_to(
+            root_path
+        )
+        directory_parts = (
+            relative_path.parts[:-1]
+        )
+
+        # 如果位于排除目录，则跳过
+        if any(
+            part in excluded_dirs
+            for part in directory_parts
+        ):
+            continue
+
+        if not any(
+            part in test_dir_names
+            for part in directory_parts
+        ):
+            continue
+
+        if not (
+            path.name.startswith("test_")
+            or path.name.endswith("_test.py")
+        ):
+            continue
+
+        test_files.append(
+            relative_path.as_posix()
+        )
+
+    return sorted(test_files)
 
 def _find_changed_python_symbols(
         project_root: str,
@@ -85,23 +135,206 @@ def find_changed_python_symbol_names(
     ]
 
 def find_affected_python_tests(
-        project_root: str,
-        changed_files: dict[str, list[str]],
+    project_root: str,
+    changed_files: dict[str, list[str]],
 ) -> list[TestIndexEntry]:
-    """根据文件变更查找直接受影响的 pytest 测试"""
+    """根据文件变更查找直接受影响的 pytest 测试。"""
 
     changed_symbols = _find_changed_python_symbols(
         project_root=project_root,
         changed_files=changed_files,
     )
+
     test_index = index_python_project_tests(
         project_root=project_root,
         source_symbols=changed_symbols,
     )
+
     return find_directly_affected_tests(
         changed_symbol_qualified_names=[
             symbol.qualified_name
             for symbol in changed_symbols
         ],
         test_index=test_index,
+    )
+
+def _build_analysis_failure_selection(
+        project_root: str,
+        python_files: list[str],
+        error: Exception
+) -> TestSelection:
+    """构建 Python 影响分析失败时的全量降级结果"""
+    return TestSelection(
+        # 安全降级：源码无法解析时不能直接抛异常，也不能返回假成功，应降级为FULL
+        # 安全降级：源码本身有效，但已有测试文件语法损坏，导致建立 TestIndex 失败，也应该为 FULL
+        mode=TestSelectionMode.FULL,
+        test_files=_find_python_test_files(project_root),
+        evidence=[
+            (
+                "Python files requiring analysis: "
+                f"{', '.join(python_files)}"
+            ),
+        ],
+        warnings=[
+            (
+                "Python impact analysis failed "
+                f"({type(error).__name__}); "
+                "falling back to all pytest "
+                "test files"
+            ),
+        ]
+    )
+
+def select_tests_for_changes(
+    project_root: str,
+    language: str | None,
+    changed_files: dict[str, list[str]],
+) -> TestSelection:
+    """为项目变更生成可解释的测试选择结果。"""
+    if (
+            not isinstance(language, str)
+            or not language.strip()
+    ):
+        language_name = "unknown"
+    else:
+        language_name = (
+            language.strip().lower()
+        )
+
+    if language_name != "python":
+        return TestSelection(
+            mode=TestSelectionMode.UNSUPPORTED,
+            test_files=[],
+            evidence=[
+                f"Requested language: {language_name}"
+            ],
+            warnings=[
+                (
+                    "Symbol-level impact analysis "
+                    "currently supports only Python"
+                )
+            ],
+        )
+
+    deleted_python_files = sorted(
+        relative_path
+        for relative_path in changed_files.get("deleted", [])
+        if relative_path.endswith(".py")
+    )
+
+    if deleted_python_files:
+        return TestSelection(
+            mode=TestSelectionMode.FULL,
+            test_files=_find_python_test_files(project_root),
+            evidence=[
+                (
+                    "Deleted Python files: "
+                    f"{', '.join(deleted_python_files)}"
+                ),
+            ],
+            warnings=[
+                (
+                    "Deleted files cannot be analyzed "
+                    "from current source; falling back "
+                    "to all pytest test files"
+                ),
+            ],
+        )
+
+    python_files_requiring_analysis = sorted(
+        relative_path
+        for change_type in ("added", "modified")
+        for relative_path in changed_files.get(change_type, [])
+        if relative_path.endswith(".py")
+    )
+
+    try:
+        changed_symbols = _find_changed_python_symbols(
+            project_root=project_root,
+            changed_files=changed_files,
+        )
+    except (SyntaxError, UnicodeError, OSError) as error:
+        return _build_analysis_failure_selection(
+            project_root=project_root,
+            python_files=python_files_requiring_analysis,
+            error=error,
+        )
+
+    if not changed_symbols:
+        return TestSelection(
+            mode=TestSelectionMode.NONE,
+            test_files=[],
+            evidence=[
+                (
+                    "No added or modified Python "
+                    "source symbols were found"
+                ),
+            ],
+            warnings=[],
+        )
+
+    try:
+        test_index = index_python_project_tests(
+            project_root=project_root,
+            source_symbols=changed_symbols,
+        )
+    except (SyntaxError, UnicodeError, OSError) as error:
+        return _build_analysis_failure_selection(
+            project_root=project_root,
+            python_files=python_files_requiring_analysis,
+            error=error,
+        )
+
+    affected_tests = find_directly_affected_tests(
+        changed_symbol_qualified_names=[
+            symbol.qualified_name
+            for symbol in changed_symbols
+        ],
+        test_index=test_index,
+    )
+
+    if not affected_tests:
+        changed_symbol_names = ", ".join(
+            symbol.qualified_name
+            for symbol in changed_symbols
+        )
+
+        return TestSelection(
+            mode=TestSelectionMode.NONE,
+            test_files=[],
+            evidence=[
+                (
+                    "Changed Python symbols: "
+                    f"{changed_symbol_names}"
+                ),
+            ],
+            warnings=[
+                (
+                    "No existing tests directly map to "
+                    "the changed symbols; create a "
+                    "TestSpec before generating tests"
+                ),
+            ],
+        )
+
+    test_files = sorted({
+        entry.test_file_path
+        for entry in affected_tests
+    })
+
+    evidence = [
+        (
+            f"{entry.source_qualified_name} -> "
+            f"{entry.test_qualified_name} "
+            f"at {entry.test_file_path}:"
+            f"{entry.test_line}"
+        )
+        for entry in affected_tests
+    ]
+
+    return TestSelection(
+        mode=TestSelectionMode.DIRECT,
+        test_files=test_files,
+        evidence=evidence,
+        warnings=[],
     )

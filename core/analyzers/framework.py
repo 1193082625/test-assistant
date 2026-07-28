@@ -50,7 +50,23 @@ class AnalyzeInfo(NamedTuple):
     project_config: FrameworkInfo
     project_info: str
 
-EXCLUDE_DIRS = ["node_modules", ".git", "__pycache__", ".venv", "venv", ".next", "dist", "build", ".autotest"]
+EXCLUDE_DIRS = [
+    "node_modules",
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".next",
+    "dist",
+    "build",
+    ".autotest",
+    ".history",
+    ".idea",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+]
 
 # 检测项目用了什么
 FRAMEWORK_DICT = {

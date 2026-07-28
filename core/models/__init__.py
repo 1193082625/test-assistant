@@ -7,7 +7,8 @@ from .enums import (
     SymbolKind,
     TestabilityStatus,
     EvidenceKind,
-    EvidenceStrength
+    EvidenceStrength,
+    TestSelectionMode
 )
 from .project import (
     FrameworkInfo,
@@ -22,6 +23,8 @@ from .source import (
     TestIndex,
     ContractEvidence
 )
+
+from .impact import TestSelection
 
 __all__ = [
     "FrameworkInfo",
@@ -40,4 +43,6 @@ __all__ = [
     "EvidenceKind",
     "EvidenceStrength",
     "ContractEvidence",
+    "TestSelectionMode",
+    "TestSelection",
 ]

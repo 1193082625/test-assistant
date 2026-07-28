@@ -24,7 +24,6 @@ def test_run_command_consumes_graph_result(tmp_path, monkeypatch):
         assert project_path == str(tmp_path)
 
         return {
-            "generated_tests": [],
             "changed_files": {
                 "added": [],
                 "deleted": [],
