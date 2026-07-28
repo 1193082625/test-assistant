@@ -3,7 +3,6 @@
 调用具体的测试执行器 -- core/executors
 调用框架分析、快照对比 -- core/analyzers
 """
-import json
 import os.path
 from typing import TypedDict, Annotated
 
@@ -12,9 +11,12 @@ from langgraph.graph import add_messages, StateGraph, END
 from langsmith import traceable
 from pydantic import BaseModel
 
-from core.executors.base import TestResult
-from core.executors.pytest_executor import PytestExecutor
-from core.executors.vitest_executor import VitestExecutor
+from core.analyzers.snapshot import Snapshot
+from core.executors import select_executor
+from core.executors.base import ExecutionReport
+from core.analyzers.impact import select_tests_for_changes
+from core.models import TestSelection, TestSelectionMode
+
 
 class ProjectInfo(BaseModel):
     project_path: str # 项目目标路径
@@ -26,67 +28,76 @@ class GraphStates(TypedDict):
     errors: list[str]
     project_info: ProjectInfo
     changed_files: dict # detect的输出 -> run 的输入
-    test_results_by_file: list[TestResult]
-    retry_count: int # 计数器
-    max_retries: int # 最大重试次数
+    execution_reports_by_file: dict[str, ExecutionReport]
+    pending_snapshots: list[Snapshot]
+    test_selection: TestSelection
 
 # LangGraph 节点只接收一个参数 -- state，多出来的参数没法传进去
 @traceable(name="detect_change")
 def detect_change_node(state: GraphStates) -> dict:
     """
-    检测文件变化
-    入： 读取文件快照，对比变更
-    出：messages += ["检测到 N 个文件变更：a.ts，b.ts"]
-    如果无变更： errors 保持空 -> 后续直接走 END
+    读取旧 manifest
+    获取新快照
+    调用 compare_snapshots
     """
     # 找到项目的 .autotest/snapshot.json
     target_path = state["project_info"].project_path
     snapshot_path = os.path.join(target_path, ".autotest", "snapshot.json")
     # 加载旧快照
-    with open(snapshot_path) as f:
-        old_snapshots = json.load(f)
+    from core.analyzers.snapshot import (read_snapshot_manifest, take_snapshot, compare_snapshots)
+    old_manifest = read_snapshot_manifest(snapshot_path)
 
     # 拍新快照（take_snapshot）
     # 延迟导入（调用时才 import，第一次慢，之后缓存），避免循环引用
-    from core.analyzers.snapshot import take_snapshot
     from core.analyzers.framework import EXCLUDE_DIRS
     new_snapshots, _ = take_snapshot(target_path, EXCLUDE_DIRS)
 
-    """
-    对比 -> 找出 新增 / 修改 / 删除的文件
-    先转成字典，对比需要按 path 查找，list 不方便
-    注意：take_snapshot 返回的是 Snapshot 对象列表 （dataclass），取值用 .path 和 .hash
-    dict 用 ["path"] 和 ["hash"]
-    
-    old_paths = set(old_map.keys())
-    new_paths = set(new_map.keys())
-    
-    # 新增 = new_paths - old_paths
-    # 删除 = old_paths - new_paths
-    # 修改 = old_paths & new_paths and hash 不同
-    """
-    old_map = {item["path"]: item["hash"] for item in old_snapshots}
-    new_map = {item.path: item.hash for item in new_snapshots}
-
-    old_paths = set(old_map.keys())
-    new_paths = set(new_map.keys())
-
-    created_paths = new_paths - old_paths
-    deleted_paths = old_paths - new_paths
-    same_paths = (old_paths & new_paths)
-    modified_paths = []
-    for path in same_paths:
-        if old_map[path] != new_map[path]:
-            modified_paths.append(path)
+    changes = compare_snapshots(
+        old_manifest.files,
+        new_snapshots
+    )
 
     # 写入 changed_files 和 messages
     return {
-        "changed_files": {
-            "added": list(created_paths),
-            "deleted": list(deleted_paths),
-            "modified": modified_paths,
-        },
+        "changed_files": changes,
+        # 同于确保检测到文件变化后，后面任何中间步骤失败，磁盘上的旧基线都保持不变，下一次运行仍能检测到这些变化。这与数据库事务“全部成功才提交”的思想相似。
+        "pending_snapshots": new_snapshots,
         "messages": "增量检查修改内容"
+    }
+
+@traceable(name="analyze_impact")
+def analyze_impact_node(state: GraphStates) -> dict:
+    """为当前项目变更生成结构化测试选择结果"""
+    project_info = state["project_info"]
+    project_config = project_info.config["project"]
+
+    selection = select_tests_for_changes(
+        project_root=project_info.project_path,
+        language=project_config.get("language", "unknown"),
+        changed_files=state["changed_files"],
+    )
+
+    return {
+        "test_selection": selection,
+        "messages": (
+            f"测试选择模式: {selection.mode.value}，"
+            f"{len(selection.test_files)} 个测试文件"
+        )
+    }
+
+@traceable(name="commit_snapshot")
+def commit_snapshot_node(state: GraphStates) -> dict:
+    """将待提交快照保存为新的比较基线"""
+    from core.analyzers.snapshot import commit_snapshot_manifest
+
+    target_path = state["project_info"].project_path
+    snapshot_path = os.path.join(target_path, ".autotest", "snapshot.json")
+
+    # 把旧基线替换为新基线
+    commit_snapshot_manifest(snapshot_path, state["pending_snapshots"])
+
+    return {
+        "messages": "✓ 快照基线已提交"
     }
 
 @traceable(name="run_affected")
@@ -98,41 +109,128 @@ def run_affected_node(state: GraphStates):
     结果写入 State
     """
     changed_files = state["changed_files"]
-    test_framework = state["project_info"].config["project"]["test_framework"]
+    project_config = (
+        state["project_info"].config["project"]
+    )
+    test_frameworks = project_config["test_frameworks"]
+    language = project_config.get("language")
 
     # 没有变更 --> 跳过执行
     if not any(changed_files.values()):
         return {
             "messages": "✓ 文件无变更，跳过测试执行",
-            "test_results_by_file": {},
+            "execution_reports_by_file": {},
             "errors": [],
         }
 
     # 没有测试框架 -> 跳过执行
-    if not test_framework:
+    if not test_frameworks:
+        reason = "未检测到测试框架，无法执行选中的测试"
         return {
-            "messages": "⚠ 未检测到测试框架，跳过执行",
-            "test_results_by_file": {},
-            "errors": [],
+            "messages": f"⚠ {reason}",
+            "execution_reports_by_file": {},
+            "errors": [reason],
         }
 
     project_path = state["project_info"].project_path
     all_results = []
-    if "vitest" in test_framework:
-        executor = VitestExecutor(cwd=project_path)
-    elif "pytest" in test_framework:
-        executor = PytestExecutor(cwd=project_path)
+    execution_errors = []
+    selection = None
+    unsupported_reasons = []
+    for framework in test_frameworks:
+        candidate = select_executor(
+            framework=framework,
+            language=language,
+            cwd=project_path,
+        )
 
-    test_results_by_file = {}
-    test_cases_dir = os.path.join(project_path, ".autotest", "test_cases")
-    if os.path.isdir(test_cases_dir):
-        for root, dirs, files in os.walk(test_cases_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                if executor.can_handle(file_path):
-                    results = list(executor.execute(file_path)) # 执行单个文件
-                    all_results.extend(results)
-                    test_results_by_file[file_path] = results # 按文件记录
+        if candidate.supported:
+            selection = candidate
+            break
+
+        unsupported_reasons.append(candidate.reason)
+
+    if selection is None:
+        reason = "; ".join(unsupported_reasons)
+
+        return {
+            "messages": f"⚠ {reason}",
+            "execution_reports_by_file": {},
+            "errors": [reason],
+        }
+
+    executor = selection.executor
+    if executor is None:
+        reason = "执行器选择结果无效：supported=True 但 executor 为空"
+
+        return {
+            "messages": f"⚠ {reason}",
+            "execution_reports_by_file": {},
+            "errors": [reason],
+        }
+
+    execution_reports_by_file = {}
+
+    test_files_to_execute: set[str] = set()
+
+    test_selection = state["test_selection"]
+    selected_test_files = test_selection.test_files
+
+    for test_file in selected_test_files:
+        if os.path.isabs(test_file):
+            file_path = test_file
+        else:
+            file_path = os.path.join(
+                project_path,
+                test_file,
+            )
+
+        test_files_to_execute.add(file_path)
+
+    for file_path in sorted(test_files_to_execute):
+        if not executor.can_handle(file_path):
+            continue
+
+        print(
+            (
+                "  → 执行测试: "
+                f"{os.path.basename(file_path)}..."
+            ),
+            end="",
+            flush=True,
+        )
+
+        report = executor.execute(file_path)
+        all_results.extend(report.test_results)
+        execution_reports_by_file[file_path] = report
+
+        if (
+                report.error_type is not None
+                and report.error_type != "test_failure"
+        ):
+            detail = (
+                    report.stderr
+                    or report.stdout
+                    or "未知执行错误"
+            )
+
+            execution_errors.append(
+                (
+                    f"{os.path.basename(file_path)}: "
+                    f"{report.error_type}: {detail}"
+                )
+            )
+
+    if not execution_reports_by_file:
+        reason = (
+            "没有选中的测试文件可由 "
+            f"{framework} 执行"
+        )
+        return {
+            "messages": f"⚠ {reason}",
+            "execution_reports_by_file": {},
+            "errors": [reason],
+        }
 
     # 统计
     passed = sum(1 for r in all_results if r.status == "passed")
@@ -140,50 +238,85 @@ def run_affected_node(state: GraphStates):
 
     failed_errors = [f"{r.name} failed" for r in failed]
 
+    errors = failed_errors + execution_errors
+
     return {
-        "messages": f"执行结果： {passed} passed, {len(failed)} failed",
-        "test_results_by_file": test_results_by_file,
-        "errors": failed_errors,
+        "messages":(
+            f"执行结果：{passed} passed, "
+            f"{len(failed)} failed, "
+            f"{len(execution_errors)} execution errors"
+        ),
+        "execution_reports_by_file": execution_reports_by_file,
+        "errors": errors,
     }
 
-@traceable(name="learn")
-def learn_node(state: GraphStates):
-    """
-    入：取 errors[0] 分析失败原因，尝试修复
-    出：
-        errors.pop(0)
-        retry_count += 1
-        完成后回到 detect_change_node
-    """
+def route_after_impact(
+        state: GraphStates,
+) -> str:
+    """根据结构化测试选择决定影响分析后的流程"""
+    selection = state["test_selection"]
+    # 有明确测试目标 可以执行
+    executable_modes = {
+        TestSelectionMode.DIRECT,
+        TestSelectionMode.MODULE,
+        TestSelectionMode.FULL,
+    }
 
-    return {"retry_count": state["retry_count"]+1}
+    if (
+        selection.mode in executable_modes
+        and selection.test_files
+    ):
+        return "run"
+
+    # 没有有效源码变化，可以提交新快照
+    if (
+        selection.mode is TestSelectionMode.NONE
+        and not selection.warnings
+    ):
+        return "commit"
+
+    # 当前不支持，不能伪装成功
+    return "end"
 
 def router(state: GraphStates):
-    """如果结果中有失败，则重新思考并修复"""
-    if state["retry_count"] >= state["max_retries"]:
-        return "pass" # 超过上限，强制结束
+    """根据执行结果决定提交、重试或结束"""
     if state["errors"]:
-        return "retry"
-    return "pass"
+        return "end"
+
+    return "commit"
 
 def run_graph(target_path: str):
     """增量执行工作流"""
     graph_builder = StateGraph(GraphStates)
     # 添加节点
     graph_builder.add_node("detect_change_node", detect_change_node)
+    graph_builder.add_node("analyze_impact_node", analyze_impact_node)
     graph_builder.add_node("run_affected_node", run_affected_node)
-    graph_builder.add_node("learn_node", learn_node)
+    graph_builder.add_node("commit_snapshot_node", commit_snapshot_node)
 
     # 设置入口节点
     graph_builder.set_entry_point("detect_change_node")
 
     # 添加边
-    graph_builder.add_edge("detect_change_node", "run_affected_node")
-    graph_builder.add_conditional_edges("run_affected_node", router, {
-        "retry": "learn_node",
-        "pass": END
-    })
-    graph_builder.add_edge("learn_node", "detect_change_node")
+    graph_builder.add_edge("detect_change_node", "analyze_impact_node")
+    graph_builder.add_conditional_edges(
+        "analyze_impact_node",
+        route_after_impact,
+        {
+            "run": "run_affected_node",
+            "commit": "commit_snapshot_node",
+            "end": END,
+        },
+    )
+    graph_builder.add_conditional_edges(
+        "run_affected_node",
+        router,
+{
+            "commit": "commit_snapshot_node",
+            "end": END
+        }
+    )
+    graph_builder.add_edge("commit_snapshot_node", END)
 
     app = graph_builder.compile()
     # invoke 需要传入初始状态
@@ -199,9 +332,11 @@ def run_graph(target_path: str):
             project_path=target_path,
             config=config
         ),
-        "test_results_by_file": [],
+        "execution_reports_by_file": {},
         "changed_files": [],
-        "retry_count": 0,
-        "max_retries": 3
+        "pending_snapshots": [],
+        "test_selection": TestSelection(
+            mode=TestSelectionMode.NONE
+        )
     })
     return result

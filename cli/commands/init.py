@@ -1,10 +1,13 @@
+"""初始化和环境预检"""
 import os
+from copy import deepcopy
+
 import click
 import yaml
-import json
 
-from core.analyzers.framework import EXCLUDE_DIRS, analyze_project, FrameworkInfo
-from core.analyzers.snapshot import take_snapshot
+from core.models import FrameworkInfo
+from core.analyzers.framework import EXCLUDE_DIRS, analyze_project
+from core.analyzers.snapshot import take_snapshot, Snapshot, SnapshotManifest, commit_snapshot_manifest
 
 from cli.commands.plan import generate_test_plan
 
@@ -15,7 +18,7 @@ DEFAULT_CONFIG = {
     "project": {
         "name": "",
         "type": "auto",  # auto | frontend | backend | miniprogram
-        "test_framework": [],  # 自动检测测试框架
+        "test_frameworks": [],  # 自动检测测试框架
     },
     "test_types": {
         "unit": {"enabled": True, "priority": 1}, # 单元测试
@@ -74,19 +77,19 @@ def create_autotest_structure(target_path: str) -> dict:
         "created_paths": created_paths,
     }
 
+def write_snapshot_manifest(autotest_path: str, snapshots: list[Snapshot]) -> str:
+    """将带版本的文件快照写入 snapshot.json"""
+    snapshots_path = os.path.join(autotest_path, "snapshot.json")
+    return commit_snapshot_manifest(
+        snapshots_path,
+        snapshots,
+    )
 
 def write_config(autotest_path: str, project_name: str, project_config: FrameworkInfo, mode: str) -> str:
     """生成并写入 config.yml，返回配置文件路径"""
-    config = DEFAULT_CONFIG.copy()
+    config = deepcopy(DEFAULT_CONFIG) # 深拷贝
     config["project"]["name"] = project_name
-    config["project"]["type"] = project_config.project_type
-    config["project"]["language"] = project_config.language
-    config["project"]["frameworks"] = project_config.frameworks
-    config["project"]["test_framework"] = project_config.test_framework
-    config["project"]["build_tools"] = project_config.build_tools
-    config["project"]["has_dockerfile"] = project_config.has_dockerfile
-    config["project"]["has_ci_config"] = project_config.has_ci_config
-
+    config["project"].update(project_config.to_config())
 
     # 识别目标项目是否为新项目
     if mode == "bootstrap":
@@ -99,7 +102,15 @@ def write_config(autotest_path: str, project_name: str, project_config: Framewor
     default_flow_style 控制 YAML 的输出格式， True 类似 JSON 单行； False 块式风格
     """
     with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        # yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        # safe_dump 能防止写出 Python 专属对象标签，让配置保持跨语言可读
+        yaml.safe_dump(
+            config,
+            f,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+        )
 
     return config_path
 
@@ -177,7 +188,7 @@ def init(path, name, mode):
             click.echo(project_info)
         except Exception as e:
             click.echo(f"⚠ 框架检测失败: {e}, 已降级为 unknown")
-            project_config = FrameworkInfo(project_type="unknown")
+            project_config = FrameworkInfo()
             project_info = "框架检测： unknown（检测失败）"
 
         # 写入配置
@@ -188,19 +199,10 @@ def init(path, name, mode):
         # 获取文件快照
         snapshots, skipped = take_snapshot(target_path, EXCLUDE_DIRS)
         # 获取要写入的快照文件地址
-        snapshot_path = os.path.join(result["autotest_path"], "snapshot.json")
-        # 写入文件
-        with open(snapshot_path, 'w', encoding="utf-8") as f:
-            """
-            把 Python 对象 -> JSON 字符串 -> 写入文件
-            这里的 s.__dict__ 是 @dataclass 自动生成的，能把对象转为字典
-            __dict__ 是 Python 每个对象都有的属性，存的是实例的所有字段（Snapshot对象） -> 字典
-            f 文件对象，序列化结果直接写入文件
-            indent=2 JSON 输出缩进2个空格，美化可读性
-            default=str 遇到 JSON 不认识的对象时，调用 str() 转成字符串
-            """
-            json.dump([s.__dict__ for s in snapshots], f, indent=2, default=str)
-
+        snapshot_path = write_snapshot_manifest(
+            autotest_path=result["autotest_path"],
+            snapshots=snapshots,
+        )
 
         click.echo(f"\n✅ 写入： {os.path.relpath(snapshot_path, target_path)}")
         click.echo(f"\n📷 文件快照：{len(snapshots)} 个文件（跳过 {skipped} 个）")

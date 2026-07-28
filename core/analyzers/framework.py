@@ -1,6 +1,17 @@
+"""
+读取目标项目并判断它是什么项目
+函数执行流程：
+detect_project_type()
+→ ProjectInfo
+→ detect_frameworks()
+→ detect_test_frameworks()
+→ detect_build_tools()
+→ FrameworkInfo
+→ AnalyzeInfo
+"""
+
 from configparser import ConfigParser
 import tomllib
-from dataclasses import dataclass
 import os
 import re
 from typing import NamedTuple
@@ -9,59 +20,93 @@ import xml.etree.ElementTree as ET
 import yaml
 import json
 
-"""
-自动扫描目标项目，并识别：
-- 这是什么类型的项目？（前端、后端、小程序）
-- 用了什么框架？（React/vue/Express/FastAPI...）
-- 用了什么测试框架？（jest/vitest/pytest...）
-- 用了什么构建工具？（Vite/webpack/poetry...）
-"""
+from core.models import FrameworkInfo, Language, ProjectType, TestFramework, ProjectAnalysis, ProjectModule
 
-# @dataclass 会自动生成 __init__，省去手写构造函数的麻烦
-@dataclass
-class FrameworkInfo:
-    project_type: str          # "frontend" | "backend" | "miniprogram" | "unknown"
-    language: str              # "javascript" | "typescript" | "python" | "java" | "go"
-    frameworks: list[str]      # ["react", "next.js"]
-    test_framework: list[str]  # ["vitest", "playwright"]
-    build_tools: list[str]     # ["vite"]
-    has_dockerfile: bool
-    has_ci_config: bool
+from configparser import Error as ConfigParserError
 
-# 声明一个元组类型
+"""
+强制每次检测同时回答两个问题：
+这是什么形态的项目
+主要使用什么语言
+"""
 class ProjectInfo(NamedTuple):
-    project_type: str
+    """表示一个标志文件产生的中间检测证据，包含初步类型、语言、来源文件、解析器和原始内容"""
+    project_type: ProjectType
+    language: Language
+    source_file: str # 告诉系统当前结论来自哪个文件
     target_analysis: str
     file_content: str
+
+# 定义可解释的检测异常
+class ProjectDetectionError(ValueError):
+    """项目标志文件无法解析"""
+    def __init__(self, source_file: str, reason: str):
+        self.source_file = source_file
+        self.reason = reason
+        super().__init__(f"{source_file} 解析失败： {reason}")
+
 
 class AnalyzeInfo(NamedTuple):
     project_config: FrameworkInfo
     project_info: str
 
-EXCLUDE_DIRS = ["node_modules", ".git", "__pycache__", ".venv", "venv", ".next", "dist", "build", ".autotest"]
+EXCLUDE_DIRS = [
+    "node_modules",
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".next",
+    "dist",
+    "build",
+    ".autotest",
+    ".history",
+    ".idea",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+]
 
+# 检测项目用了什么
 FRAMEWORK_DICT = {
     "react": "React",
     "vue": "Vue",
+    "svelte": "Svelte",
     "@angular/core": "Angular",
     "@dcloudio/uni-app": "uni-app",
+    "solid-js": "Solid",
+    "preact": "Preact",
+    "@remix-run/react": "Remix",
+    "lit": "Lit",
+    "@sveltejs/kit":"SvelteKit",
     "express": "Express",
     "fastify": "Fastify",
     "next": "Next",
     "nuxt": "Nuxt",
+    "@nestjs/core": "NestJS",
+    "koa": "Koa",
+    "hono": "Hono",
 
     "django": "Django",
     "fastapi": "FastAPI",
-    "flask": "Flask"
+    "flask": "Flask",
+    "tornado": "Tornado",
+    "sanic": "Sanic",
+    "bottle": "Bottle",
+    "aiohttp": "AIOHTTP",
 }
-# 检测已安装了什么
+# 检测用什么测试框架
 TEST_FRAMEWORK_DICT = {
-    "vitest": "vitest",
-    "jest": "jest",
-    "@playwright": "playwright",
-    "cypress": "cypress",
-
-    "pytest": "pytest"
+    "vitest": TestFramework.VITEST,
+    "jest": TestFramework.JEST,
+    "cypress": TestFramework.CYPRESS,
+    "mocha": TestFramework.MOCHA,
+    "ava": TestFramework.AVA,
+    "@wdio/cli": TestFramework.WEBDRIVERIO,
+    "playwright": TestFramework.PLAYWRIGHT,
+    "@playwright/test": TestFramework.PLAYWRIGHT,
+    "pytest": TestFramework.PYTEST,
 }
 # 根据项目推荐安装测试框架
 FRAMEWORK_TEST_MAP = {
@@ -69,6 +114,9 @@ FRAMEWORK_TEST_MAP = {
     "uni-app": ["vitest", "@vue/test-utils", "happy-dom"],
     "vue": ["vitest", "@vue/test-utils", "happy-dom"],
     "react": ["vitest", "@testing-library/react", "happy-dom", "@testing-library/jest-dom"],
+    "Svelte": ["vitest", "happy-dom"],
+    "Solid": ["vitest", "solid-testing-library"],
+    "NestJS": ["jest"],
     # Python
     "python": ["pytest"],
     "Django": ["pytest"],
@@ -106,7 +154,49 @@ BUILD_TOOL_DICT = {
     "esbuild": "ESBuild",
     "typescript": "TypeScript",
     "tsc": "TypeScript",
+    "swc": "SWC",
+    "turbo": "Turbopack",
+    "parcel": "Parcel",
+    "gulp": "Gulp",
+    "postcss": "PostCSS",
+    "babel": "Babel",
 }
+
+MINIPROGRAM_PACKAGES = {
+    "@dcloudio/uni-app",
+    "@dcloudio/uni-mp-weixin",
+}
+
+FRONTEND_PACKAGES = {
+    "react",
+    "vue",
+    "svelte",
+    "@angular/core",
+    "solid-js",
+    "preact",
+    "@remix-run/react",
+    "next",
+    "nuxt",
+    "lit",
+    "@sveltejs/kit"
+}
+BACKEND_PACKAGES = {
+    "express",
+    "fastify",
+    "@nestjs/core",
+    "koa",
+    "hono",
+    "@hono/node-server",
+}
+
+# 定义允许降级的解析异常
+PARSER_ERRORS = (
+    json.JSONDecodeError,
+    tomllib.TOMLDecodeError,
+    ET.ParseError,
+    ConfigParserError,
+    yaml.YAMLError,
+)
 
 def read_file(path: str):
     with open(path, 'r', encoding="utf-8") as data:
@@ -114,61 +204,100 @@ def read_file(path: str):
 
 def detect_project_type(files: list[str], root: str) -> ProjectInfo | None:
     """查找项目标志性文件，判断项目类型"""
-    result = None
-    for f in files:
-        path = os.path.join(root, f)
-        if f == "package.json":
-            result = ProjectInfo(
-                project_type="frontend",
-                target_analysis="json",
-                file_content=read_file(path)
-            )
-            break # 找到了就跳出
-        elif f == "pyproject.toml":
-            result = ProjectInfo(
-                project_type="python",
-                target_analysis="tomllib",
-                file_content=read_file(path)
-            )
-            break 
+    file_names = set(files)
+    if "pages.json" in file_names or "manifest.json" in file_names:
+        """
+        有 package.json 时优先保存它的内容，后续框架检测需要从 dependencies 中识别，如果保存的是空的 pages.json，会丢失依赖证据
+        """
+        if "package.json" in file_names:
+            content = read_file(os.path.join(root, "package.json"))
+            source_file = "package.json"
+        else:
+            marker = ("pages.json" if "pages.json" in file_names else "manifest.json")
+            content = read_file(os.path.join(root, marker))
+            source_file = marker
+        return ProjectInfo(
+            project_type=ProjectType.MINIPROGRAM,
+            language=Language.JAVASCRIPT,
+            source_file=source_file,
+            target_analysis="json",
+            file_content=content
+        )
 
-        elif f == "pytest.ini" or f == "setup.cfg":
-            result = ProjectInfo(
-                project_type="python",
-                target_analysis="configparser",
-                file_content=read_file(path)
-            )
-            break # 找到了就跳出
-        elif f == "pom.xml":
-            result = ProjectInfo(
-                project_type="Java",
-                target_analysis="xml.etree.ElementTree",
-                file_content=read_file(path)
-            )
-            break # 找到了就跳出
-        elif f == "build.gradle":
-            result = ProjectInfo(
-                project_type="Java",
-                target_analysis="build.gradle",
-                file_content=read_file(path)
-            )
-            break # 找到了就跳出
-        elif f == "go.mod":
-            result = ProjectInfo(
-                project_type="Go",
-                target_analysis="Go",
-                file_content=read_file(path)
-            )
-            break # 找到了就跳出
-        elif f == "manifest.json" or f == "pages.json":
-            result = ProjectInfo(
-                project_type="Mini-program",
-                target_analysis="json",
-                file_content=read_file(path)
-            )
-            break # 找到了就跳出
+    if "pyproject.toml" in file_names:
+        content = read_file(os.path.join(root, "pyproject.toml"))
+        return ProjectInfo(
+            project_type=ProjectType.BACKEND,
+            language=Language.PYTHON,
+            source_file="pyproject.toml",
+            target_analysis="tomllib",
+            file_content=content
+        )
+    if "pytest.ini" in file_names or "setup.cfg" in file_names:
+        marker = ("setup.cfg" if "setup.cfg" in file_names else "pytest.ini")
+        content = read_file(os.path.join(root, marker))
+        return ProjectInfo(
+            project_type=ProjectType.BACKEND,
+            language=Language.PYTHON,
+            source_file=marker,
+            target_analysis="configparser",
+            file_content=content
+        )
 
-    return result
+    if "pom.xml" in file_names:
+        content = read_file(os.path.join(root, "pom.xml"))
+        return ProjectInfo(
+            project_type=ProjectType.BACKEND,
+            language=Language.JAVA,
+            source_file="pom.xml",
+            target_analysis="xml.etree.ElementTree",
+            file_content=content
+        )
+    if "build.gradle" in file_names:
+        content = read_file(os.path.join(root, "build.gradle"))
+        return ProjectInfo(
+            project_type=ProjectType.BACKEND,
+            language=Language.JAVA,
+            source_file="build.gradle",
+            target_analysis="build.gradle",
+            file_content=content
+        )
+    if "go.mod" in file_names:
+        content = read_file(os.path.join(root, "go.mod"))
+        return ProjectInfo(
+            project_type=ProjectType.BACKEND,
+            language=Language.GO,
+            source_file="go.mod",
+            target_analysis="go",
+            file_content=content
+        )
+
+    if "package.json" in file_names:
+        """这里采用明确优先级 小程序>Node 后端 > 前端 > 未知"""
+        content = read_file(os.path.join(root, "package.json"))
+        dependencies = parse_package_dependencies(content)
+
+        if dependencies & MINIPROGRAM_PACKAGES:
+            project_type = ProjectType.MINIPROGRAM
+        elif dependencies & BACKEND_PACKAGES:
+            project_type = ProjectType.BACKEND
+        elif dependencies & FRONTEND_PACKAGES:
+            project_type = ProjectType.FRONTEND
+        else:
+            project_type = ProjectType.UNKNOWN
+
+        language = (Language.TYPESCRIPT if "typescript" in dependencies else Language.JAVASCRIPT)
+
+        return ProjectInfo(
+            project_type=project_type,
+            language=language,
+            source_file="package.json",
+            target_analysis="json",
+            file_content=content
+        )
+
+    return None
+
 
 def analysis_go(content: str) -> dict:
     """简单的 go.mod 解析器 -- 提取依赖列表"""
@@ -189,8 +318,8 @@ def analysis_go(content: str) -> dict:
     
     return deps
 
-def detect_result_list(project_info: ProjectInfo, origin_dict: dict) -> list[str]:
-    """"""
+def detect_result_list(project_info: ProjectInfo, origin_dict: dict) -> list:
+    """固定优先级为： 小程序 > Python > Java > Go > package.json"""
     result = []
     package_json_content = project_info.file_content
     target_analysis = project_info.target_analysis
@@ -233,7 +362,7 @@ def detect_result_list(project_info: ProjectInfo, origin_dict: dict) -> list[str
 
     elif target_analysis == "build.gradle": # 暂时不深入解析
         data = {}
-    elif target_analysis == "Go": # 解析 go.mod
+    elif target_analysis == "go": # 解析 go.mod
         data = analysis_go(package_json_content)
     else:
         data = yaml.safe_load(package_json_content) # 解析 YAML -- Python 字典
@@ -248,8 +377,53 @@ def detect_frameworks(project_info: ProjectInfo) -> list[str]:
     """解析项目使用了什么框架"""
     return detect_result_list(project_info, FRAMEWORK_DICT)
 
+def parse_package_dependencies(content: str, source_file: str = "package.json") -> set[str]:
+    """从 package.json 内容提取生产和开发依赖名称"""
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as exc:
+        # raise ... from exc 表示 “领域异常是由底层 JSON 异常引起的”，既给用户友好信息，也保留调试因果链
+        raise ProjectDetectionError(
+            source_file,
+            str(exc),
+        ) from exc
 
-def detect_test_frameworks(project_info: ProjectInfo) -> list[str]:
+    if not isinstance(data, dict):
+        raise ProjectDetectionError(
+            source_file,
+            "根节点必须是 JSON 对象"
+        )
+
+    dependencies = data.get("dependencies", {})
+    dev_dependencies = data.get("devDependencies", {})
+
+    if not isinstance(dependencies, dict):
+        raise ProjectDetectionError(
+            source_file,
+            "dependencies 必须是对象"
+        )
+
+    if not isinstance(dev_dependencies, dict):
+        raise ProjectDetectionError(
+            source_file,
+            "devDependencies 必须是对象"
+        )
+
+    return set(dependencies) | set(dev_dependencies)
+
+# 增加统一降级函数
+def unknown_analysis(
+        source_file: str,
+        reason: str
+) -> AnalyzeInfo:
+    return AnalyzeInfo(
+        project_config=FrameworkInfo(),
+        project_info=(
+            f"框架检测：未知（{source_file} 解析失败：{reason}）"
+        )
+    )
+
+def detect_test_frameworks(project_info: ProjectInfo) -> list[TestFramework]:
     """解析项目使用了什么测试框架"""
     return detect_result_list(project_info, TEST_FRAMEWORK_DICT)
 
@@ -258,54 +432,139 @@ def detect_build_tools(project_info: ProjectInfo) -> list[str]:
     """解析项目使用了什么构建工具"""
     return detect_result_list(project_info, BUILD_TOOL_DICT)
 
+def build_framework_info(project_info: ProjectInfo) -> FrameworkInfo:
+    """将一个标志文件的中间证据整理为模块分析结果"""
+    return FrameworkInfo(
+        project_type=project_info.project_type,
+        language=project_info.language,
+        frameworks=detect_frameworks(project_info),
+        test_frameworks=detect_test_frameworks(project_info),
+        build_tools=detect_build_tools(project_info),
+        has_dockerfile=False,
+        has_ci_config=False,
+    )
+
+def analyze_project_modules(target_path: str) -> ProjectAnalysis:
+    """扫描目标目录并分析其中所有项目模块"""
+    analysis = ProjectAnalysis(root_path=target_path)
+
+    for root, dirs, files in os.walk(target_path):
+        # sorted 用于保证遍历子目录的顺序稳定，不受文件系统返回顺序影响
+        dirs[:] = sorted(d for d in dirs if d not in EXCLUDE_DIRS)
+
+        try:
+            project_info = detect_project_type(files, root)
+        except ProjectDetectionError as exc:
+            analysis.modules.append(
+                ProjectModule(
+                    root_path=root,
+                    source_file=exc.source_file,
+                    framework_info=FrameworkInfo()
+                )
+            )
+            relative_path = os.path.relpath(
+                os.path.join(root, exc.source_file),
+                target_path
+            )
+            analysis.warnings.append(
+                f"{relative_path} 解析失败：{exc.reason}"
+            )
+
+            continue
+
+        if project_info is None:
+            continue
+
+        try:
+            framework_info = build_framework_info(project_info)
+        except PARSER_ERRORS as exc:
+            framework_info = FrameworkInfo()
+
+            relative_path = os.path.relpath(
+                os.path.join(root, project_info.source_file),
+                target_path
+            )
+
+            analysis.warnings.append(
+                f"{relative_path} 解析失败：{exc}"
+            )
+
+        module = ProjectModule(
+            root_path=root,
+            source_file=project_info.source_file,
+            framework_info=framework_info,
+        )
+
+        analysis.modules.append(module)
+
+    return analysis
+
 def analyze_project(target_path: str) -> AnalyzeInfo:
     """项目检测入口函数"""
     detect_project_result = None
     for root, dirs, files in os.walk(target_path):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
-        result = detect_project_type(files, root)
+        try:
+            result = detect_project_type(files, root)
+        except ProjectDetectionError as exc:
+            return unknown_analysis(
+                exc.source_file,
+                exc.reason
+            )
+
         if result:
             detect_project_result = result
             break # 找到了就退出循环
 
     if not detect_project_result:
         return AnalyzeInfo(
-            project_config=FrameworkInfo(project_type="unknown"),
-            project_info="框架检测： 未知"
+            project_config=FrameworkInfo(),
+            project_info=(
+                "框架检测： 未知"
+                "（未发现支持的项目标志文件）"
+            )
         )
 
-    config = FrameworkInfo(
-        project_type=detect_project_result.project_type or "",
-        language="",
-        frameworks=detect_frameworks(detect_project_result) or [],
-        test_framework=detect_test_frameworks(detect_project_result) or [],
-        build_tools=detect_build_tools(detect_project_result) or [],
-        has_dockerfile=False,
-        has_ci_config=False,
-    )
+    try:
+        config = build_framework_info(detect_project_result)
+        if config.project_type is ProjectType.UNKNOWN:
+            return AnalyzeInfo(
+                project_config=config,
+                project_info=(
+                    "框架检测：未知"
+                    f"（{detect_project_result.source_file} "
+                    "未识别到支持的框架依赖）"
+                )
+            )
+    # 不要使用 except Exception , 否则 AttributeError、变量拼写错误等程序缺陷也会被伪装成“配置解析失败”
+    except PARSER_ERRORS as exc:
+        return unknown_analysis(
+            detect_project_result.source_file,
+            str(exc),
+        )
 
     return AnalyzeInfo(
         project_config=config,
         project_info=f"框架检测：{' + '.join(config.frameworks)}"
     )
 
-def suggest_test_framework(frameworks: list, project_type: str = "") -> list[str] | None:
+def suggest_test_framework(frameworks: list, language: str = "") -> list[str] | None:
     """根据项目信息推荐测试框架（含额外依赖），返回包名列表 或 None"""
     for framework in frameworks:
         if framework in FRAMEWORK_TEST_MAP:
             return FRAMEWORK_TEST_MAP[framework]
-    if project_type in FRAMEWORK_TEST_MAP:
-        return FRAMEWORK_TEST_MAP[project_type]
+    if language.lower() in FRAMEWORK_TEST_MAP:
+        return FRAMEWORK_TEST_MAP[language.lower()]
     return None
 
-def suggest_config_templates(frameworks: list, project_type: str = "") -> dict[str, str]:
+def suggest_config_templates(frameworks: list, language: str = "") -> dict[str, str]:
     """根据项目信息推荐需要生成的配置文件模板，返回 {文件名: 内容}"""
     templates: dict[str, str] = {}
     for framework in frameworks:
         if framework in FRAMEWORK_CONFIG_TEMPLATES:
             templates.update(FRAMEWORK_CONFIG_TEMPLATES[framework])
-    if project_type in FRAMEWORK_CONFIG_TEMPLATES:
-        templates.update(FRAMEWORK_CONFIG_TEMPLATES[project_type])
+    if language in FRAMEWORK_CONFIG_TEMPLATES:
+        templates.update(FRAMEWORK_CONFIG_TEMPLATES[language])
     return templates
 
 if __name__ == "__main__":

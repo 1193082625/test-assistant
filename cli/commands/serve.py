@@ -1,3 +1,5 @@
+"""启动 Web Dashboard"""
+
 import click
 
 @click.command()

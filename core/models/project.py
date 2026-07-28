@@ -1,0 +1,90 @@
+"""项目检测结果领域模型"""
+
+from dataclasses import dataclass, field
+from .enums import Language, ProjectType, TestFramework
+
+@dataclass
+class FrameworkInfo:
+    project_type: ProjectType = ProjectType.UNKNOWN
+    language: Language = Language.UNKNOWN
+    frameworks: list[str] = field(default_factory=list) # default_factory=list 会为每个实例创建独立列表。【普通列表是可变对象，如果多个实例共享一个默认列表，修改一个实例可能污染另一个实例】
+    test_frameworks: list[TestFramework] = field(default_factory=list)
+    build_tools: list[str] = field(default_factory=list)
+    has_dockerfile: bool = False
+    has_ci_config: bool = False
+
+    # 增加配置转换
+    def to_config(self) -> dict:
+        """转换为可写入 YAML / JSON 的配置字典"""
+        return {
+            "type": self.project_type.value,
+            "language": self.language.value,
+            "frameworks": list(self.frameworks),
+            "test_frameworks": [framework.value for framework in self.test_frameworks],
+            "build_tools": list(self.build_tools),
+            "has_dockerfile": self.has_dockerfile,
+            "has_ci_config": self.has_ci_config,
+        }
+
+    # @classmethod 表示这个方法属于类，可以这样调用： FrameworkInfo.from_config(config)
+    # 其中 cls(...) 等价于 创建 FrameworkInfo(...)，但未来子类调用时也能返回对应子类
+    @classmethod
+    def from_config(cls, config: dict) -> "FrameworkInfo":
+        """从 YAML / JSON 读取出的字典恢复领域模型"""
+        return cls(
+            project_type=ProjectType(
+                config.get("type", ProjectType.UNKNOWN.value),
+            ),
+            language=Language(
+                config.get("language", Language.UNKNOWN.value),
+            ),
+            frameworks=list(config.get("frameworks", [])),
+            test_frameworks=[
+                TestFramework(value)
+                for value in config.get("test_frameworks", [])
+            ],
+            build_tools=list(config.get("build_tools", [])),
+            has_dockerfile=bool(config.get("has_dockerfile", False)),
+            has_ci_config=bool(config.get("has_ci_config", False)),
+        )
+
+@dataclass
+class ProjectModule:
+    """
+    目标项目中的一个可独立分析模块
+    表示一个模块的最终分析结果，包含模块根目录、标志文件和 FrameworkInfo
+    """
+
+    root_path: str
+    source_file: str
+    framework_info: FrameworkInfo
+
+@dataclass
+class ProjectAnalysis:
+    """
+    目标目录的多模块分析结果，即整个目标目录的分析结果
+    """
+    root_path: str
+    modules: list[ProjectModule] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def primary_type(self) -> ProjectType:
+        """根据所有已识别模块计算项目整体类型"""
+
+        # 从所有模块中取出已识别的项目类型，排除 unknown，并自动驱虫
+        # {...} 表示创建 set，集合会自动去重
+        known_types = {
+            module.framework_info.project_type
+            for module in self.modules
+            if module.framework_info.project_type
+            is not ProjectType.UNKNOWN
+        }
+
+        if not known_types:
+            return ProjectType.UNKNOWN
+
+        if len(known_types) == 1:
+            return list(known_types)[0]
+
+        return ProjectType.MIXED

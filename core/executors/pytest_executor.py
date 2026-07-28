@@ -2,7 +2,8 @@
 import subprocess
 import re
 
-from core.executors.base import BaseExecutor, TestResult
+from core.executors.base import BaseExecutor, TestResult, ExecutionReport, normalize_process_output
+
 
 class PytestExecutor(BaseExecutor):
     """调用 pytest 执行测试文件"""
@@ -11,16 +12,54 @@ class PytestExecutor(BaseExecutor):
     def can_handle(self, file_path: str) -> bool:
         return file_path.endswith(".py") and ("test_" in file_path or "_test" in file_path)
 
-    def execute(self, file_path: str) -> list[TestResult]:
-        # 用 subprocess 跑 pytest，只输出简洁结果
-        result = subprocess.run(
-            ["python", "-m", "pytest", file_path, "-v", "--tb=short"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=self.cwd,
+    def execute(self, file_path: str) -> ExecutionReport:
+        try:
+            # 用 subprocess 跑 pytest，只输出简洁结果
+            result = subprocess.run(
+                ["python", "-m", "pytest", file_path, "-v", "--tb=short"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=self.cwd,
+            )
+        # 超时必须放在正常报告之外，因为它没有可靠的进程退出码
+        except subprocess.TimeoutExpired as error:
+            return ExecutionReport(
+                test_results=[],
+                stdout=normalize_process_output(error.stdout),
+                stderr=normalize_process_output(error.stderr) or str(error),
+                exit_code=None,
+                timed_out=True,
+                error_type="timeout",
+            )
+        # FileNotFoundError 是 OSError 的子类。除了命令不存在，工作目录不存在、权限不足等启动层错误也通常属于 OSError
+        except OSError as error:
+            return ExecutionReport(
+                test_results=[],
+                stdout="",
+                stderr=str(error),
+                exit_code=None,
+                error_type="startup_error",
+            )
+
+        # 解析出的每一条测试用例结果
+        test_results = self._parse_output(result.stdout, result.returncode)
+
+        error_type = None
+
+        # error_type 表示整个 pytest 命令是否正常完成
+        if result.returncode == 1:
+            error_type = "test_failure"
+        elif result.returncode != 0:
+            error_type = "runner_error"
+
+        return ExecutionReport(
+            test_results=test_results,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.returncode,
+            error_type=error_type,
         )
-        return self._parse_output(result.stdout, result.returncode)
 
     def _parse_output(self, stdout: str, returncode: int) -> list[TestResult]:
         """解析 pytest 的 -v 输出"""
