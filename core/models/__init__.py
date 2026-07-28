@@ -27,7 +27,7 @@ from .source import (
 
 from .impact import TestSelection
 
-from .test_spec import ExpectationEvidence, TestSpec
+from .test_spec import ExpectationEvidence, TestSpec, build_test_spec_id
 
 __all__ = [
     "FrameworkInfo",
@@ -51,4 +51,5 @@ __all__ = [
     "TestSpecStatus",
     "ExpectationEvidence",
     "TestSpec",
+    "build_test_spec_id"
 ]

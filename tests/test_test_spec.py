@@ -5,6 +5,7 @@ from core.models import (
     EvidenceStrength,
     ExpectationEvidence,
     TestSpec as Spec,
+    build_test_spec_id
 )
 
 def test_test_spec_status_has_stable_machine_values():
@@ -580,3 +581,27 @@ def test_models_reject_non_mapping_persisted_data(
         match=message,
     ):
         model.from_dict([])
+
+
+def test_build_test_spec_id_is_stable_and_safe():
+    """测试 相同意图重复规划时必须得到同一个ID， 避免产生重复计划"""
+    first = build_test_spec_id(
+        target_symbol="demo.add",
+        behavior="计算两个整数之和"
+    )
+    repeated = build_test_spec_id(
+        target_symbol="demo.add",
+        behavior="计算两个整数之和"
+    )
+
+    different = build_test_spec_id(
+        target_symbol="demo.add",
+        behavior="计算两个整数之差"
+    )
+    assert first == "spec-8d01877475892fad"
+    assert repeated == first
+    assert different != first
+
+    assert "/" not in first
+    assert "\\" not in first
+    assert "." not in first

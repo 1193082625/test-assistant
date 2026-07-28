@@ -2,7 +2,7 @@ import json
 import pytest
 from core.models import (
     TestSpec as Spec,
-    TestSpecStatus as SpecStatus,
+    TestSpecStatus as SpecStatus
 )
 from core.repositories.test_spec import TestSpecRepository as SpecRepository
 
@@ -334,3 +334,98 @@ def test_review_decision_cannot_be_reversed(
     assert repository.get(
         "spec-demo-add-001"
     ) == reviewed
+
+def test_list_all_returns_specs_in_stable_id_order(tmp_path):
+    repository = SpecRepository(
+        project_root=tmp_path,
+    )
+
+    second = Spec(
+        id="spec-demo-002",
+        target_symbol="demo.subtract",
+        behavior="计算两个整数之差",
+        arrange={
+            "a": 3,
+            "b": 1,
+        },
+        action="调用 subtract(a, b)",
+        expected={
+            "return": 2,
+        }
+    )
+
+    first = Spec(
+        id="spec-demo-001",
+        target_symbol="demo.add",
+        behavior="计算两个整数之和",
+        arrange={
+            "a": 1,
+            "b": 2,
+        },
+        action="调用 add(a, b)",
+        expected={
+            "return": 3,
+        }
+    )
+
+    # 故意按照相反顺序保存
+    repository.save(second)
+    repository.save(first)
+
+    specs = repository.list_all()
+
+    assert [spec.id for spec in specs] == ["spec-demo-001", "spec-demo-002"]
+    assert specs == [first, second]
+
+def test_list_all_returns_empty_for_missing_directory(tmp_path):
+    repository = SpecRepository(
+        project_root=tmp_path,
+    )
+
+    assert repository.list_all() == []
+
+def test_repository_rejects_invalid_root_format(tmp_path):
+    plans_path = (tmp_path / ".autotest" / "plans")
+    plans_path.mkdir(parents=True, exist_ok=True)
+
+    (plans_path / "spec-demo-001.json").write_text(
+        "[]\n",
+        encoding="utf-8",
+    )
+    repository = SpecRepository(
+        project_root=tmp_path,
+    )
+    with pytest.raises(
+        ValueError,
+        match=(
+            "TestSpec 存储格式无效: "
+            "根节点必须是字典"
+        ),
+    ):
+        repository.get("spec-demo-001")
+
+def test_repository_rejects_missing_spec_payload(tmp_path):
+    plans_path = (tmp_path / ".autotest" / "plans")
+    plans_path.mkdir(parents=True, exist_ok=True)
+
+    (plans_path / "spec-demo-001.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repository = SpecRepository(
+        project_root=tmp_path,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "TestSpec 存储格式无效: "
+            "缺少 spec 字段"
+        ),
+    ):
+        repository.get("spec-demo-001")

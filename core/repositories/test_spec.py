@@ -82,6 +82,12 @@ class TestSpecRepository:
         with target_path.open(encoding="utf-8") as f:
             payload = json.load(f)
 
+        if not isinstance(payload, dict):
+            raise ValueError(
+                "TestSpec 存储格式无效: "
+                "根节点必须是字典"
+            )
+
         version = payload.get("version")
 
         if version != TEST_SPEC_FORMAT_VERSION:
@@ -91,6 +97,13 @@ class TestSpecRepository:
                     f"存储版本: {version}"
                 )
             )
+
+        if "spec" not in payload:
+            raise ValueError(
+                "TestSpec 存储格式无效: "
+                "缺少 spec 字段"
+            )
+
         return TestSpec.from_dict(payload["spec"])
 
     def approve(self, spec_id: str) -> TestSpec:
@@ -148,3 +161,20 @@ class TestSpecRepository:
         )
         self.save(rejected)
         return rejected
+
+    def list_all(self) -> list[TestSpec]:
+        """
+        按照稳定 ID 顺序读取全部 TestSpec
+
+        plans 目录不存在时返回空列表
+        临时文件不会被读取，因为只匹配 .json
+        """
+        spec_paths = sorted(
+            self.plans_path.glob("*.json"), # 只匹配正式 JSON 文件
+            key=lambda plan: plan.name,
+        )
+
+        return [
+            self.get(spec_path.stem)
+            for spec_path in spec_paths
+        ]

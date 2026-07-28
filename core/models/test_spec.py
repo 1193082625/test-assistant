@@ -1,11 +1,45 @@
 """测试意图及预期证据领域模型"""
-
+import hashlib
 from dataclasses import dataclass, field
 from .enums import (
     EvidenceKind,
     EvidenceStrength,
     TestSpecStatus
 )
+
+def build_test_spec_id(
+        target_symbol: str,
+        behavior: str,
+) -> str:
+    """
+    根据测试目标和行为生成稳定、安全的 TestSpec ID
+    首尾空白不参与 ID 计算，避免格式差异产生重复计划
+    """
+    if (
+        not isinstance(target_symbol, str)
+        or not target_symbol.strip()
+    ):
+        raise ValueError(
+            "target_symbol 不能为空"
+        )
+
+    if (
+        not isinstance(behavior, str)
+        or not behavior.strip()
+    ):
+        raise ValueError(
+            "behavior 不能为空"
+        )
+
+    canonical_value = (
+        f"{target_symbol.strip()}\n"
+        f"{behavior.strip()}"
+    )
+
+    digest = hashlib.sha256(canonical_value.encode(encoding="utf-8")).hexdigest()[:16]
+
+    return f"spec-{digest}"
+
 
 @dataclass(frozen=True)
 class ExpectationEvidence:
