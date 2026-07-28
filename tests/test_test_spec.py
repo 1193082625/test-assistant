@@ -59,6 +59,7 @@ def test_test_spec_records_test_intent():
         is EvidenceStrength.MEDIUM
     )
     assert spec.is_weak_inference is False
+    assert spec.can_support_product_defect is False
 
 def test_expectation_evidence_records_basis():
     evidence = ExpectationEvidence(
@@ -120,7 +121,7 @@ def test_strong_evidence_makes_expectation_strong():
         is EvidenceStrength.STRONG
     )
     assert spec.is_weak_inference is False
-
+    assert spec.can_support_product_defect is True
 
 @pytest.mark.parametrize(
     ("field_name", "invalid_value", "message"),
@@ -317,6 +318,7 @@ def test_test_spec_serializes_to_machine_values():
         "status": "proposed",
         "expectation_strength": "medium",
         "is_weak_inference": False,
+        "can_support_product_defect": False,
     }
 
 def test_test_spec_dict_round_trip():
@@ -463,3 +465,118 @@ def test_expectation_evidence_rejects_invalid_fields(
         match=message,
     ):
         ExpectationEvidence(**values)
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value", "message"),
+    [
+        (
+            "content",
+            None,
+            (
+                "ExpectationEvidence content "
+                "不能为空"
+            ),
+        ),
+        (
+            "source_line",
+            "2",
+            (
+                "ExpectationEvidence source_line "
+                "必须是正整数"
+            ),
+        ),
+    ],
+)
+def test_expectation_evidence_from_dict_does_not_coerce(
+    field_name,
+    invalid_value,
+    message,
+):
+    data = {
+        "kind": "docstring",
+        "content": "返回两个整数之和",
+        "strength": "medium",
+        "source_path": "demo.py",
+        "source_line": 2,
+    }
+    data[field_name] = invalid_value
+
+    with pytest.raises(
+        ValueError,
+        match=message,
+    ):
+        ExpectationEvidence.from_dict(data)
+
+def test_current_implementation_evidence_is_weak():
+    evidence = ExpectationEvidence(
+        kind=EvidenceKind.CURRENT_IMPLEMENTATION,
+        content="当前实现返回 a + b",
+        strength=EvidenceStrength.WEAK,
+        source_path="demo.py",
+        source_line=2,
+    )
+
+    spec = Spec(
+        id="spec-demo-add-regression",
+        target_symbol="demo.add",
+        behavior="保持当前加法行为",
+        arrange={
+            "a": 1,
+            "b": 2,
+        },
+        action="调用 add(a, b)",
+        expected={
+            "return": 3,
+        },
+        evidence=[evidence],
+    )
+
+    assert (
+        spec.expectation_strength
+        is EvidenceStrength.WEAK
+    )
+    assert spec.is_weak_inference is True
+    assert spec.can_support_product_defect is False
+
+def test_current_implementation_cannot_be_medium_evidence():
+    with pytest.raises(
+        ValueError,
+        match=(
+            "当前实现证据的强度必须是 weak"
+        ),
+    ):
+        ExpectationEvidence(
+            kind=EvidenceKind.CURRENT_IMPLEMENTATION,
+            content="当前实现返回 a + b",
+            strength=EvidenceStrength.MEDIUM,
+            source_path="demo.py",
+            source_line=2,
+        )
+
+@pytest.mark.parametrize(
+    ("model", "message"),
+    [
+        (
+            ExpectationEvidence,
+            (
+                "ExpectationEvidence "
+                "持久化数据必须是字典"
+            ),
+        ),
+        (
+            Spec,
+            (
+                "TestSpec 持久化数据必须是字典"
+            ),
+        ),
+    ],
+)
+def test_models_reject_non_mapping_persisted_data(
+    model,
+    message,
+):
+    with pytest.raises(
+        ValueError,
+        match=message,
+    ):
+        model.from_dict([])

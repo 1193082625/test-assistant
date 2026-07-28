@@ -68,6 +68,9 @@ class EvidenceKind(StrEnum):
     # 已有测试对当前行为的约束
     EXISTING_TEST="existing_test"
 
+    # 从当前实现行为提取的回归依据，不代表外部业务契约。
+    CURRENT_IMPLEMENTATION = "current_implementation"
+
 class EvidenceStrength(StrEnum):
     """契约证据能够支持测试预期的可信程度"""
     # 明确结构化契约或已有测试，可作为强约束

@@ -67,6 +67,16 @@ class ExpectationEvidence:
             )
 
         if (
+                self.kind
+                is EvidenceKind.CURRENT_IMPLEMENTATION
+                and self.strength
+                is not EvidenceStrength.WEAK
+        ):
+            raise ValueError(
+                "当前实现证据的强度必须是 weak"
+            )
+
+        if (
             not isinstance(
                 self.source_path,
                 str,
@@ -105,12 +115,23 @@ class ExpectationEvidence:
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "ExpectationEvidence":
         """从机器值字典↩恢复预期证据"""
+        if not isinstance(data, dict):
+            raise ValueError(
+                (
+                    "ExpectationEvidence "
+                    "持久化数据必须是字典"
+                )
+            )
         return cls(
-            kind=EvidenceKind(data["kind"]),
-            content=str(data["content"]),
-            strength=EvidenceStrength(data["strength"]),
-            source_path=str(data["source_path"]),
-            source_line=int(data["source_line"]),
+            kind=EvidenceKind(
+                data["kind"]
+            ),
+            content=data["content"],
+            strength=EvidenceStrength(
+                data["strength"]
+            ),
+            source_path=data["source_path"],
+            source_line=data["source_line"],
         )
 
 
@@ -285,6 +306,19 @@ class TestSpec:
             is EvidenceStrength.WEAK
         )
 
+    @property
+    def can_support_product_defect(self) -> bool:
+        """
+        当前证据是否足以参与产品缺陷判断
+
+        只有强证据可以作为产品缺陷诊断依据
+        最终诊断仍需结合测试执行和环境证据
+        """
+        return (
+            self.expectation_strength
+            is EvidenceStrength.STRONG
+        )
+
     def to_dict(self) -> dict[str, object]:
         """
         转换为稳定、可序列化的字典
@@ -307,6 +341,7 @@ class TestSpec:
             "status": self.status.value,
             "expectation_strength": self.expectation_strength.value,
             "is_weak_inference": self.is_weak_inference,
+            "can_support_product_defect": self.can_support_product_defect,
         }
 
     @classmethod
@@ -320,6 +355,11 @@ class TestSpec:
         不对领域字段做隐式类型转换；
         非法输入统一交给领域校验拒绝。
         """
+        if not isinstance(data, dict):
+            raise ValueError(
+                "TestSpec 持久化数据必须是字典"
+            )
+
         evidence_data = data.get(
             "evidence",
             [],
