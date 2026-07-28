@@ -6,7 +6,7 @@ from .enums import SymbolKind, TestabilityStatus, EvidenceKind, EvidenceStrength
 
 @dataclass
 class SourceSymbol:
-    """一个可定位、可区分上下文的源码符号"""
+    """一个可定位、可区分上下文的源码符号，即文件中一个具体的函数"""
     name: str
     qualified_name: str
     kind: SymbolKind
@@ -44,6 +44,7 @@ class TestabilityAssessment:
     status: TestabilityStatus
     reasons: list[str] = field(default_factory=list)
 
+# 记录源码符号和已有测试之间的关系
 @dataclass(frozen=True)
 class TestIndexEntry:
     """
