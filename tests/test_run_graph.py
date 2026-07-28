@@ -1031,3 +1031,128 @@ def test_detect_change_ignores_history_directory(tmp_path):
         "modified": [],
         "deleted": [],
     }
+
+@pytest.mark.parametrize(
+    "source_relative_path",
+    [
+        "demo.py",
+        "src/demo.py",
+    ],
+)
+def test_run_graph_accepts_layout_and_commits(
+    tmp_path,
+    monkeypatch,
+    source_relative_path,
+):
+    source_path = tmp_path / source_relative_path
+    source_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    source_path.write_text(
+        (
+            "def add(a, b):\n"
+            "    return a + b\n"
+        ),
+        encoding="utf-8",
+    )
+
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+
+    selected_test = tests_path / "test_demo.py"
+    selected_test.write_text(
+        (
+            "from demo import add\n"
+            "\n"
+            "def test_add():\n"
+            "    assert add(1, 2) == 3\n"
+        ),
+        encoding="utf-8",
+    )
+
+    unrelated_test = tests_path / "test_other.py"
+    unrelated_test.write_text(
+        "def test_other(): pass\n",
+        encoding="utf-8",
+    )
+
+    snapshots, skipped = take_snapshot(
+        str(tmp_path),
+        excludes=[".autotest"],
+    )
+    assert skipped == 0
+
+    autotest_path = tmp_path / ".autotest"
+    autotest_path.mkdir()
+    snapshot_path = autotest_path / "snapshot.json"
+
+    commit_snapshot_manifest(
+        str(snapshot_path),
+        snapshots,
+    )
+    (autotest_path / "config.yml").write_text(
+        (
+            "project:\n"
+            "  language: python\n"
+            "  test_frameworks:\n"
+            "    - pytest\n"
+        ),
+        encoding="utf-8",
+    )
+
+    source_path.write_text(
+        (
+            "def add(a, b):\n"
+            "    return a - b\n"
+        ),
+        encoding="utf-8",
+    )
+
+    executed_files: list[str] = []
+
+    def fake_execute(self, file_path):
+        executed_files.append(file_path)
+        return ExecutionReport(
+            test_results=[
+                ExecutionTestResult(
+                    name="test_add",
+                    status="passed",
+                    duration=0.01,
+                )
+            ],
+            stdout="1 passed",
+            stderr="",
+            exit_code=0,
+            error_type=None,
+        )
+
+    monkeypatch.setattr(
+        PytestExecutor,
+        "execute",
+        fake_execute,
+    )
+
+    result = run_graph(str(tmp_path))
+
+    assert result["errors"] == []
+    assert executed_files == [
+        str(selected_test),
+    ]
+
+    stored_manifest = read_snapshot_manifest(
+        str(snapshot_path)
+    )
+    current_snapshots, _ = take_snapshot(
+        str(tmp_path),
+        excludes=[".autotest"],
+    )
+
+    assert compare_snapshots(
+        stored_manifest.files,
+        current_snapshots,
+    ) == {
+        "added": [],
+        "modified": [],
+        "deleted": [],
+    }
