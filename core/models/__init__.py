@@ -10,6 +10,7 @@ from .enums import (
     EvidenceStrength,
     TestSelectionMode,
     TestSpecStatus,
+    PlannerStatus,
 )
 from .project import (
     FrameworkInfo,
@@ -28,6 +29,7 @@ from .source import (
 from .impact import TestSelection
 
 from .test_spec import ExpectationEvidence, TestSpec, build_test_spec_id
+from .planner import PlannerResult
 
 __all__ = [
     "FrameworkInfo",
@@ -51,5 +53,7 @@ __all__ = [
     "TestSpecStatus",
     "ExpectationEvidence",
     "TestSpec",
-    "build_test_spec_id"
+    "build_test_spec_id",
+    "PlannerResult",
+    "PlannerStatus"
 ]

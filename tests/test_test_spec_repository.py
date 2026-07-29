@@ -429,3 +429,30 @@ def test_repository_rejects_missing_spec_payload(tmp_path):
         ),
     ):
         repository.get("spec-demo-001")
+
+def test_repository_uses_test_spec_model_to_validate_spec_data(tmp_path):
+    """Repository 使用 TestSpec 模型校验 spec 数据"""
+    plans_path = (tmp_path / ".autotest" / "plans")
+    plans_path.mkdir(parents=True, exist_ok=True)
+
+    (plans_path / "spec-demo-001.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "spec": []
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repository = SpecRepository(
+        project_root=tmp_path,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "TestSpec 持久化数据必须是字典"
+        )
+    ):
+        repository.get("spec-demo-001")

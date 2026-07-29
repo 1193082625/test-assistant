@@ -109,3 +109,9 @@ class TestSpecStatus(StrEnum):
     APPROVED="approved"
     # 已拒绝：不能进入生成器，但仍应保留拒绝记录
     REJECTED="rejected"
+
+class PlannerStatus(StrEnum):
+    """Planner 生成结构化 TestSpec 的结果状态。"""
+    SUCCESS = "success"
+    EMPTY = "empty"
+    INVALID = "invalid"
