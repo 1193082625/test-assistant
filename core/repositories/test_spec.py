@@ -1,4 +1,4 @@
-"""TestSpec 的版本话 JSON repository"""
+"""TestSpec 的版本化 JSON repository"""
 
 import json
 import os

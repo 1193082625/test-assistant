@@ -6,7 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from cli.commands.init import write_config, write_snapshot_manifest, init as init_command
-from cli.commands.plan import get_snapshot_files
+from cli.commands.framework_suggestion import get_snapshot_files
 from core.analyzers.snapshot import Snapshot
 from core.models import ProjectType, Language, FrameworkInfo
 from core.models import TestFramework as Framework

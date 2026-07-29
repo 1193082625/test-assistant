@@ -9,7 +9,7 @@ from core.models import FrameworkInfo
 from core.analyzers.framework import EXCLUDE_DIRS, analyze_project
 from core.analyzers.snapshot import take_snapshot, Snapshot, SnapshotManifest, commit_snapshot_manifest
 
-from cli.commands.plan import generate_test_plan
+from cli.commands.framework_suggestion import generate_test_plan
 
 # 测试用例持久化到项目 `.autotest/` 目录，可直接被项目引用
 AUTOTEST_DIR = ".autotest"
