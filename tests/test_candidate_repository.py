@@ -1,10 +1,14 @@
-import pytest
 import json
+import os
 from pathlib import Path
+
+import pytest
+
 from core.repositories import (
     CandidateRepository,
     build_candidate_content_digest,
 )
+
 
 GENERATOR_MODEL = "fake-model"
 TEMPLATE_VERSION = "test-spec-generator-v1"
@@ -491,3 +495,977 @@ def test_repository_keeps_same_named_sources_separate(
     assert second_path.read_text(
         encoding="utf-8",
     ) == "def test_service_b(): pass\n"
+
+def test_repository_builds_diff_for_new_candidate(tmp_path):
+    """
+    这条测试锁定四个设计决策：
+    diff 是结构化结果，不只是展示文本。
+    正式路径由候选元数据推导，调用者不能任意指定。
+    新文件使用 /dev/null 作为旧文件。
+    diff 携带内容摘要，后续批准和提交可以验证“批准的是同一份内容”。
+    """
+    repository = CandidateRepository(tmp_path)
+    content = (
+        "from demo import add\n"
+        "\n"
+        "def test_add():\n"
+        "    assert add(1, 2) == 3\n"
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=content,
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    result = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+    assert result.candidate_path == candidate_path
+    assert result.final_path == (
+        tmp_path
+        / ".autotest"
+        / "test_cases"
+        / "unit"
+        / "src"
+        / "demo.py"
+        / "test_demo.py"
+    )
+    assert result.change_type == "created"
+    assert result.content_sha256 == (
+        build_candidate_content_digest(
+            content
+        )
+    )
+    assert "--- /dev/null" in result.text
+    assert (
+        "+++ .autotest/test_cases/unit/"
+        "src/demo.py/test_demo.py"
+    ) in result.text
+    assert "+def test_add():" in result.text
+    assert (
+            result.original_content_sha256
+            is None
+    )
+
+def test_repository_builds_diff_for_existing_test(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    final_path = (
+        tmp_path
+        / ".autotest"
+        / "test_cases"
+        / "unit"
+        / "src"
+        / "demo.py"
+        / "test_demo.py"
+    )
+    final_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    original_content = (
+        "def test_value():\n"
+        "    assert VALUE == 1\n"
+    )
+    final_path.write_text(
+        original_content,
+        encoding="utf-8",
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=(
+            "def test_value():\n"
+            "    assert VALUE == 2\n"
+        ),
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    result = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+
+    expected_relative_path = (
+        ".autotest/test_cases/unit/"
+        "src/demo.py/test_demo.py"
+    )
+
+    assert result.change_type == "modified"
+    assert result.final_path == final_path
+    assert (
+        f"--- {expected_relative_path}"
+        in result.text
+    )
+    assert (
+        f"+++ {expected_relative_path}"
+        in result.text
+    )
+    assert "-    assert VALUE == 1" in result.text
+    assert "+    assert VALUE == 2" in result.text
+
+    assert final_path.read_text(
+        encoding="utf-8",
+    ) == original_content
+    assert result.original_content_sha256 == (
+        build_candidate_content_digest(
+            original_content
+        )
+    )
+
+def test_repository_rejects_tampered_candidate_when_building_diff(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=(
+            "def test_value():\n"
+            "    assert VALUE == 1\n"
+        ),
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    candidate_path.write_text(
+        (
+            "def test_value():\n"
+            "    assert VALUE == 999\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="候选测试内容摘要不匹配",
+    ):
+        repository.build_diff(
+            candidate_path=candidate_path,
+        )
+
+def test_repository_rejects_unsafe_metadata_source_path(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=(
+            "def test_value():\n"
+            "    assert VALUE == 1\n"
+        ),
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    metadata_path = candidate_path.with_name(
+        f"{candidate_path.name}.meta.json"
+    )
+    metadata = json.loads(
+        metadata_path.read_text(
+            encoding="utf-8",
+        )
+    )
+    metadata["source_relative_path"] = (
+        "../../../../outside"
+    )
+    metadata_path.write_text(
+        (
+                json.dumps(
+                    metadata,
+                    ensure_ascii=False,
+                    indent=4,
+                )
+                + "\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+            ValueError,
+            match="候选测试元数据路径不安全",
+    ):
+        repository.build_diff(
+            candidate_path=candidate_path,
+        )
+
+def test_repository_rejects_unsafe_metadata_test_filename(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=(
+            "def test_value():\n"
+            "    assert VALUE == 1\n"
+        ),
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    metadata_path = candidate_path.with_name(
+        f"{candidate_path.name}.meta.json"
+    )
+    metadata = json.loads(
+        metadata_path.read_text(
+            encoding="utf-8",
+        )
+    )
+    metadata["test_filename"] = (
+        "../test_escape.py"
+    )
+    metadata_path.write_text(
+        (
+            json.dumps(
+                metadata,
+                ensure_ascii=False,
+                indent=4,
+            )
+            + "\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="候选测试元数据路径不安全",
+    ):
+        repository.build_diff(
+            candidate_path=candidate_path,
+        )
+
+def test_repository_rejects_metadata_that_does_not_match_candidate_path(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=(
+            "def test_value():\n"
+            "    assert VALUE == 1\n"
+        ),
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    metadata_path = candidate_path.with_name(
+        f"{candidate_path.name}.meta.json"
+    )
+    metadata = json.loads(
+        metadata_path.read_text(
+            encoding="utf-8",
+        )
+    )
+    metadata["source_relative_path"] = (
+        "src/other.py"
+    )
+    metadata_path.write_text(
+        (
+                json.dumps(
+                    metadata,
+                    ensure_ascii=False,
+                    indent=4,
+                )
+                + "\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+            ValueError,
+            match=(
+                    "候选测试元数据与文件路径不匹配"
+            ),
+    ):
+        repository.build_diff(
+            candidate_path=candidate_path,
+        )
+
+def test_repository_approves_unchanged_candidate_diff(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=(
+            "def test_value():\n"
+            "    assert VALUE == 1\n"
+        ),
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    reviewed_diff = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+
+    approval = repository.approve_diff(
+        reviewed_diff=reviewed_diff,
+    )
+
+    assert (
+        approval.candidate_path
+        == reviewed_diff.candidate_path
+    )
+    assert (
+        approval.final_path
+        == reviewed_diff.final_path
+    )
+    assert (
+        approval.content_sha256
+        == reviewed_diff.content_sha256
+    )
+    assert (
+        approval.original_content_sha256
+        == reviewed_diff.original_content_sha256
+    )
+
+def test_repository_rejects_approval_when_final_test_changed_after_review(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    final_path = (
+        tmp_path
+        / ".autotest"
+        / "test_cases"
+        / "unit"
+        / "src"
+        / "demo.py"
+        / "test_demo.py"
+    )
+    final_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    final_path.write_text(
+        (
+            "def test_value():\n"
+            "    assert VALUE == 1\n"
+        ),
+        encoding="utf-8",
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=(
+            "def test_value():\n"
+            "    assert VALUE == 2\n"
+        ),
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    reviewed_diff = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+
+    final_path.write_text(
+        (
+            "def test_value():\n"
+            "    assert VALUE == 3\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="候选 diff 已发生变化",
+    ):
+        repository.approve_diff(
+            reviewed_diff=reviewed_diff,
+        )
+
+    assert final_path.read_text(
+        encoding="utf-8",
+    ) == (
+        "def test_value():\n"
+        "    assert VALUE == 3\n"
+    )
+
+def test_repository_rejects_commit_without_candidate_approval(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=(
+            "def test_value():\n"
+            "    assert VALUE == 1\n"
+        ),
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    reviewed_diff = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+
+    with pytest.raises(
+        TypeError,
+        match=(
+            "approval 必须是 "
+            "CandidateApproval"
+        ),
+    ):
+        repository.commit_candidate(
+            approval=reviewed_diff,
+        )
+
+    assert not reviewed_diff.final_path.exists()
+
+def test_repository_commits_approved_new_candidate(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+    content = (
+        "def test_value():\n"
+        "    assert VALUE == 1\n"
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=content,
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    reviewed_diff = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+    approval = repository.approve_diff(
+        reviewed_diff=reviewed_diff,
+    )
+
+    committed_path = (
+        repository.commit_candidate(
+            approval=approval,
+        )
+    )
+
+    assert committed_path == (
+        reviewed_diff.final_path
+    )
+    assert committed_path.read_text(
+        encoding="utf-8",
+    ) == content
+    assert candidate_path.read_text(
+        encoding="utf-8",
+    ) == content
+
+def test_repository_does_not_overwrite_file_created_after_approval(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+    candidate_content = (
+        "def test_generated():\n"
+        "    assert True\n"
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=candidate_content,
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    reviewed_diff = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+    assert (
+        reviewed_diff
+        .original_content_sha256
+        is None
+    )
+
+    approval = repository.approve_diff(
+        reviewed_diff=reviewed_diff,
+    )
+
+    final_path = reviewed_diff.final_path
+    final_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    manual_content = (
+        "def test_written_by_user():\n"
+        "    assert True\n"
+    )
+    final_path.write_text(
+        manual_content,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="CandidateApproval 已过期",
+    ):
+        repository.commit_candidate(
+            approval=approval,
+        )
+
+    assert final_path.read_text(
+        encoding="utf-8",
+    ) == manual_content
+    assert list(
+        final_path.parent.glob(
+            f".{final_path.name}.*.tmp"
+        )
+    ) == []
+
+def test_repository_commits_approved_change_to_existing_test(
+    tmp_path,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    final_path = (
+        tmp_path
+        / ".autotest"
+        / "test_cases"
+        / "unit"
+        / "src"
+        / "demo.py"
+        / "test_demo.py"
+    )
+    final_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    original_content = (
+        "def test_value():\n"
+        "    assert VALUE == 1\n"
+    )
+    final_path.write_text(
+        original_content,
+        encoding="utf-8",
+    )
+
+    candidate_content = (
+        "def test_value():\n"
+        "    assert VALUE == 2\n"
+    )
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=candidate_content,
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    reviewed_diff = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+    assert reviewed_diff.change_type == (
+        "modified"
+    )
+    assert (
+        reviewed_diff
+        .original_content_sha256
+        == build_candidate_content_digest(
+            original_content
+        )
+    )
+
+    approval = repository.approve_diff(
+        reviewed_diff=reviewed_diff,
+    )
+    committed_path = (
+        repository.commit_candidate(
+            approval=approval,
+        )
+    )
+
+    assert committed_path == final_path
+    assert final_path.read_text(
+        encoding="utf-8",
+    ) == candidate_content
+    assert candidate_path.read_text(
+        encoding="utf-8",
+    ) == candidate_content
+
+def test_repository_preserves_files_when_atomic_replace_fails(
+    tmp_path,
+    monkeypatch,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    final_path = (
+        tmp_path
+        / ".autotest"
+        / "test_cases"
+        / "unit"
+        / "src"
+        / "demo.py"
+        / "test_demo.py"
+    )
+    final_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    original_content = (
+        "def test_original():\n"
+        "    assert True\n"
+    )
+    final_path.write_text(
+        original_content,
+        encoding="utf-8",
+    )
+
+    candidate_content = (
+        "def test_generated():\n"
+        "    assert True\n"
+    )
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=candidate_content,
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    reviewed_diff = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+    approval = repository.approve_diff(
+        reviewed_diff=reviewed_diff,
+    )
+
+    def fail_replace(
+        self,
+        target,
+    ):
+        raise OSError(
+            "simulated replace failure"
+        )
+
+    monkeypatch.setattr(
+        Path,
+        "replace",
+        fail_replace,
+    )
+
+    with pytest.raises(
+        OSError,
+        match="simulated replace failure",
+    ):
+        repository.commit_candidate(
+            approval=approval,
+        )
+
+    assert final_path.read_text(
+        encoding="utf-8",
+    ) == original_content
+    assert candidate_path.read_text(
+        encoding="utf-8",
+    ) == candidate_content
+    assert list(
+        final_path.parent.glob(
+            f".{final_path.name}.*.tmp"
+        )
+    ) == []
+
+def test_repository_rejects_candidate_changed_during_commit(
+    tmp_path,
+    monkeypatch,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+    approved_content = (
+        "def test_approved():\n"
+        "    assert True\n"
+    )
+    changed_content = (
+        "def test_changed_later():\n"
+        "    assert False\n"
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=approved_content,
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    reviewed_diff = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+    approval = repository.approve_diff(
+        reviewed_diff=reviewed_diff,
+    )
+    final_path = reviewed_diff.final_path
+
+    original_read_text = Path.read_text
+    candidate_read_count = 0
+
+    def changing_read_text(
+        self,
+        *args,
+        **kwargs,
+    ):
+        nonlocal candidate_read_count
+
+        if self == candidate_path:
+            candidate_read_count += 1
+
+            if candidate_read_count == 2:
+                return changed_content
+
+        return original_read_text(
+            self,
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        changing_read_text,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "候选测试在提交期间发生变化"
+        ),
+    ):
+        repository.commit_candidate(
+            approval=approval,
+        )
+
+    assert not final_path.exists()
+    assert list(
+        final_path.parent.glob(
+            f".{final_path.name}.*.tmp"
+        )
+    ) == []
+
+def test_repository_does_not_overwrite_file_created_during_commit(
+    tmp_path,
+    monkeypatch,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+    candidate_content = (
+        "def test_generated():\n"
+        "    assert True\n"
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=candidate_content,
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    reviewed_diff = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+    assert (
+        reviewed_diff
+        .original_content_sha256
+        is None
+    )
+    approval = repository.approve_diff(
+        reviewed_diff=reviewed_diff,
+    )
+
+    final_path = reviewed_diff.final_path
+    manual_content = (
+        "def test_created_during_commit():\n"
+        "    assert True\n"
+    )
+
+    original_fsync = os.fsync
+
+    def create_manual_file_then_fsync(
+        file_descriptor,
+    ):
+        final_path.write_text(
+            manual_content,
+            encoding="utf-8",
+        )
+        return original_fsync(
+            file_descriptor
+        )
+
+    monkeypatch.setattr(
+        os,
+        "fsync",
+        create_manual_file_then_fsync,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "正式测试在提交期间发生变化"
+        ),
+    ):
+        repository.commit_candidate(
+            approval=approval,
+        )
+
+    assert final_path.read_text(
+        encoding="utf-8",
+    ) == manual_content
+    assert list(
+        final_path.parent.glob(
+            f".{final_path.name}.*.tmp"
+        )
+    ) == []
+
+def test_repository_does_not_overwrite_existing_test_changed_during_commit(
+    tmp_path,
+    monkeypatch,
+):
+    repository = CandidateRepository(
+        tmp_path
+    )
+
+    final_path = (
+        tmp_path
+        / ".autotest"
+        / "test_cases"
+        / "unit"
+        / "src"
+        / "demo.py"
+        / "test_demo.py"
+    )
+    final_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    original_content = (
+        "def test_original():\n"
+        "    assert True\n"
+    )
+    final_path.write_text(
+        original_content,
+        encoding="utf-8",
+    )
+
+    candidate_path = repository.save(
+        spec_id="spec-demo-001",
+        source_relative_path="src/demo.py",
+        test_filename="test_demo.py",
+        content=(
+            "def test_generated():\n"
+            "    assert True\n"
+        ),
+        generator_model="fake-model",
+        template_version="v1",
+    )
+
+    reviewed_diff = repository.build_diff(
+        candidate_path=candidate_path,
+    )
+    approval = repository.approve_diff(
+        reviewed_diff=reviewed_diff,
+    )
+
+    manual_content = (
+        "def test_changed_during_commit():\n"
+        "    assert True\n"
+    )
+    original_fsync = os.fsync
+
+    def change_final_then_fsync(
+        file_descriptor,
+    ):
+        final_path.write_text(
+            manual_content,
+            encoding="utf-8",
+        )
+        return original_fsync(
+            file_descriptor
+        )
+
+    monkeypatch.setattr(
+        os,
+        "fsync",
+        change_final_then_fsync,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "正式测试在提交期间发生变化"
+        ),
+    ):
+        repository.commit_candidate(
+            approval=approval,
+        )
+
+    assert final_path.read_text(
+        encoding="utf-8",
+    ) == manual_content
+    assert list(
+        final_path.parent.glob(
+            f".{final_path.name}.*.tmp"
+        )
+    ) == []
