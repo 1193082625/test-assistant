@@ -1,322 +1,227 @@
 # test-assistant
 
-`test-assistant` 当前的 `v0.4.0` 候选版面向 Python + pytest
-项目，提供人工审批的测试生成、可解释的增量执行和证据驱动的失败诊断闭环。
+`test-assistant` 是一个面向 Python/pytest 项目的本地智能测试 CLI。
 
-## 核心流程
-
-```mermaid
-flowchart LR
-    A["读取项目配置"] --> B["比较文件快照"]
-    B --> C["分析变更符号"]
-    C --> D["建立已有测试索引"]
-    D --> E["生成 TestSelection"]
-    E --> F{"选择模式"}
-    F -->|direct / module / full| G["执行选中的 pytest 文件"]
-    F -->|none 且无警告| H["提交快照"]
-    F -->|unsupported / 警告| I["安全结束"]
-    G -->|成功| H
-    G -->|失败| I
-```
-
-只有测试成功或确认没有需要执行的源码变化时，才会提交新的快照基线。分析失败、执行失败、不支持的项目和无映射源码不会被静默视为成功。
+当前 `v0.4.0` 候选版提供一条可信的测试闭环：分析源码和契约、生成可审阅的 TestSpec、隔离候选测试、执行质量门禁、人工确认 diff，并对失败给出有证据的诊断。
 
 ## 当前能力
 
-- 支持根目录布局和 `src/` 布局的 Python 项目；
-- 提取类、函数、方法及其模块限定名；
-- 判断符号是否可直接测试、需要隔离或不适合作为直接入口；
-- 提取 docstring 和类型提示等契约证据；
-- 建立源码符号到已有 pytest 测试的直接映射；
-- 对测试选择返回 `direct`、`module`、`full`、`none` 或 `unsupported`；
-- 直接执行新增或修改的正式 pytest 文件；
-- 只执行选中的测试文件，不遍历旧候选测试目录；
-- 测试成功后原子提交快照，失败时保留旧基线；
-- 测试环境默认关闭 LangSmith 网络追踪。
-- TestSpec 必须人工批准后才能生成候选测试；
-- 候选测试经过静态、收集、Runner 和隔离执行门禁；
-- 正式测试写入前必须显示 diff 并再次人工确认；
+- 分析 Python 项目、源码符号、契约证据和已有 pytest 映射；
+- 根据变更安全选择需要执行的已有测试；
+- 从指定源码符号提议结构化 TestSpec；
+- 只有人工批准的 TestSpec 才能进入测试生成器；
+- 候选测试经过静态、导入、收集、Runner、隔离执行和副作用门禁；
+- 正式测试写入前展示 diff，并要求第二次人工确认；
+- 对指定 pytest node 精确复跑三次；
 - 区分产品缺陷、测试缺陷、基础设施故障、Flaky 和证据不足；
-- 诊断包含置信度、证据、位置、建议动作和复现命令；
-- 诊断记录使用版本化 JSON 原子保存，并可生成脱敏 Markdown 报告。
+- 原子保存 TestSpec、候选、验证状态和脱敏诊断报告。
 
-## 使用方式
+## 安全原则
 
-项目初始化后，可以查看当前变化及选择依据：
-
-```bash
-poetry run test-assistant inspect --path .
+```text
+TestSpec 人工审批
+→ 候选测试隔离生成
+→ 自动质量门禁
+→ diff 人工审批
+→ 正式测试提交
+→ 确定性验证与诊断
 ```
 
-输出包括：
+- 未批准的 TestSpec 不能生成测试；
+- 未通过门禁或未确认 diff 的候选不能进入正式测试目录；
+- `verify` 只执行用户指定的精确 pytest node；
+- 证据不足时返回 `INCONCLUSIVE`，不以高置信度猜测；
+- 工具不会自动修改产品源码或自动批准业务预期。
 
-- 项目语言和测试框架；
-- 变更符号及可测性；
-- 契约证据；
-- 测试选择模式；
-- 选中的测试文件；
-- 选择证据和安全降级警告。
+## 环境要求
 
-执行增量测试：
+- Python `>=3.13,<4.0`
+- Poetry
+- 目标项目可以在当前 Python 环境运行 pytest
+
+安装项目依赖：
 
 ```bash
-poetry run test-assistant run --path .
+git clone <repository-url>
+cd test-assistant
+poetry install
+poetry run test-assistant --help
 ```
 
-查看 TestSpec、生成候选并人工确认：
+## 配置 LLM
+
+`plan propose` 和 `generate` 需要调用 LLM：
+
+```bash
+export DEEPSEEK_API_KEY="your-api-key"
+export DEEPSEEK_BASE_URL="https://your-api-endpoint"
+```
+
+`DEEPSEEK_BASE_URL` 应指向所使用的 OpenAI 兼容服务地址。不要把密钥提交到 Git。
+
+`init`、`inspect`、`run`、`verify`、`status`、`diagnose` 和 `report` 不调用 LLM。
+
+## 快速开始
+
+第一次使用建议选择一个小型 Python/pytest 项目，并在独立 Git 分支或项目副本中试运行。
+
+以下示例假设目标项目是 `/path/to/demo-project`，其中存在：
+
+```python
+# demo.py
+def add(left: int, right: int) -> int:
+    """返回两个整数之和。"""
+    return left + right
+```
+
+### 1. 初始化目标项目
+
+```bash
+poetry run test-assistant init \
+  --path /path/to/demo-project \
+  --mode auto
+```
+
+该命令创建 `.autotest/`、配置和初始快照。目标项目已经初始化过时，不需要重复执行。
+
+### 2. 检查项目分析结果
+
+```bash
+poetry run test-assistant inspect \
+  --path /path/to/demo-project
+```
+
+确认项目语言、pytest、目标符号、契约证据和测试选择没有异常。
+
+### 3. 提议 TestSpec
 
 ```bash
 poetry run test-assistant plan propose demo.add \
-  --path /path/to/project \
+  --path /path/to/demo-project \
   --source-path demo.py \
   --module-path demo
+```
 
+命令会输出生成的 `SPEC_ID` 和保存位置。
+
+### 4. 查看并批准 TestSpec
+
+```bash
 poetry run test-assistant plan list \
-  --path /path/to/project
+  --path /path/to/demo-project
 
 poetry run test-assistant plan show SPEC_ID \
-  --path /path/to/project
+  --path /path/to/demo-project
 
 poetry run test-assistant plan approve SPEC_ID \
-  --path /path/to/project
+  --path /path/to/demo-project
+```
 
+批准前应人工检查行为、输入、预期结果、证据来源和副作用声明。不符合业务意图时使用 `plan reject`。
+
+### 5. 生成并审阅候选测试
+
+```bash
 poetry run test-assistant generate SPEC_ID \
-  --path /path/to/project \
+  --path /path/to/demo-project \
   --module-path demo \
   --source-path demo.py \
   --test-filename test_demo.py
 ```
 
-候选测试通过门禁并确认 diff 后，验证精确 pytest node：
+候选通过质量门禁后，CLI 会展示 diff。只有明确确认后才会写入正式测试目录。请记录命令输出中的正式测试路径和 pytest 函数名。
+
+### 6. 验证精确 pytest node
 
 ```bash
 poetry run test-assistant verify SPEC_ID \
-  --path /path/to/project \
+  --path /path/to/demo-project \
   --test-node ".autotest/test_cases/unit/demo.py/test_demo.py::test_add" \
   --source-path demo.py
 ```
 
-`verify` 会重新运行静态、Runner 和精确收集门禁，并只复跑指定
-pytest node 三次。连续三次通过时记录健康状态；失败时归因并保存诊断，
-命令返回非零退出码。
+`verify` 会重新检查测试门禁，并只执行指定 node 三次：
 
-解释已保存的诊断、查看状态并生成报告：
+- 连续三次通过：返回 `0` 并更新健康状态；
+- 失败或结果不一致：保存诊断并返回非零退出码。
+
+实际测试路径和函数名以 `generate` 输出及 pytest collect 结果为准。
+
+### 7. 查看状态、诊断和报告
+
+```bash
+poetry run test-assistant status \
+  --path /path/to/demo-project
+```
+
+失败后可以解释诊断并生成 Markdown 报告：
 
 ```bash
 poetry run test-assistant diagnose \
-  --input .autotest/diagnoses/latest.json
-poetry run test-assistant status --path .
-poetry run test-assistant report --path .
+  --input /path/to/demo-project/.autotest/diagnoses/latest.json
+
+poetry run test-assistant report \
+  --path /path/to/demo-project
 ```
 
-运行项目测试套件：
+报告默认写入：
+
+```text
+.autotest/reports/latest.md
+```
+
+## 增量运行已有测试
+
+`run` 是独立的快照驱动流程，用于选择并执行受变更影响的已有测试：
+
+```bash
+poetry run test-assistant run \
+  --path /path/to/demo-project
+```
+
+它与 TestSpec 的 `propose → approve → generate → verify` 生命周期可以分别使用。
+
+## 目标项目工作区
+
+初始化和后续命令会维护：
+
+```text
+.autotest/
+├── config.yml              项目配置
+├── snapshot.json           增量分析基线
+├── plans/                  TestSpec
+├── candidates/             隔离候选及 metadata
+├── test_cases/unit/        人工确认后的正式测试
+├── diagnoses/              诊断历史与 latest.json
+├── verification/           最近一次验证状态
+└── reports/                Markdown 报告
+```
+
+## 当前限制
+
+- 可信生成和符号归因主流程只支持 Python/pytest；
+- Web Dashboard 和 watch 尚未实现；
+- Vitest 执行器不属于当前 TestSpec 生成闭环；
+- 没有已批准强契约时，稳定失败通常返回 `INCONCLUSIVE`；
+- 当前使用版本化 JSON，尚未引入 SQLite 或远程服务；
+- 真实 LLM 验证是显式 smoke test，不属于默认自动化测试。
+
+## 文档
+
+- [完整用户指南](docs/user-guide.md)：参数解释、完整操作、退出码和排错；
+- [项目结构](docs/project-structure.md)：模块职责、依赖方向、数据流和系统不变量；
+- [可信 CLI 路线图](docs/plans/2026-07-27-python-cli-trusted-loop-roadmap.md)：范围、里程碑和后续方向；
+- [端到端 CLI 实施计划](docs/plans/2026-08-01-end-to-end-cli-workflow.md)：本轮架构决策和测试计划。
+
+`docs/plans/` 中较早的设计文件属于历史记录，不代表当前命令或目录结构。
+
+## 开发与验证
 
 ```bash
 poetry run pytest -q
+poetry build
+poetry run python -m cli.main --help
+git diff --check
 ```
 
-## 当前边界
-
-- 符号级影响分析目前只支持 Python；
-- 当前只建立可静态确认的直接测试映射；
-- 删除 Python 源码或分析失败时会安全降级为正式 pytest 测试全集；
-- 没有直接测试映射的源码会保留警告，等待后续 TestSpec 流程；
-- `PRODUCT_DEFECT` 只在已批准的强契约、全部测试门禁通过、
-  同环境三次稳定断言失败时成立；其余证据不足场景返回 `INCONCLUSIVE`；
-- Web Dashboard、监听模式和 Vitest 测试生成尚未进入受支持主流程；
-- 默认测试不调用真实 LLM，真实模型验证仅作为可选 smoke test。
-- `plan propose` 和 `generate` 需要配置 `DEEPSEEK_API_KEY`，以及服务需要时的
-  `DEEPSEEK_BASE_URL`；`verify`、`status`、`diagnose` 和 `report` 不调用 LLM。
-
-## 项目的代码地图
-
-```text
-cli/
-  commands/
-    init.py              用户执行 init 的入口
-    run.py               用户执行测试的入口
-
-core/
-  models/                业务概念和合法值
-    enums.py             项目类型、语言、测试框架
-    project.py           FrameworkInfo
-
-  analyzers/
-    framework.py         读取目标项目并判断它是什么项目
-    snapshot.py          记录文件状态
-    source_analyzer.py   分析 Python 函数和类
-    source.py            Python 符号、导入和测试索引
-    contract.py          docstring 与类型提示契约证据
-    impact.py            变更影响与 TestSelection
-
-  generators/
-    test_generator.py    旧生成器实验代码，未接入 M0 Graph
-
-  executors/
-    pytest_executor.py   执行 pytest
-    vitest_executor.py   执行 vitest
-
-  graphs/
-    run_graph.py         串联检测、影响分析、执行和快照提交
-```
-
-## 项目检测的完整数据流
-
-**当前检测流程可以概括为：**
-
-```
-扫描目录
-→ 选择标志文件
-→ 读取文件
-→ 根据标志与依赖初步分类
-→ 生成 ProjectInfo
-→ 提取框架、测试框架、构建工具
-→ 生成 FrameworkInfo
-→ 包装为 AnalyzeInfo
-```
-
-**异常流程是：**
-
-```
-解析失败
-→ ProjectDetectionError 或 PARSER_ERRORS
-→ unknown_analysis
-→ 返回可解释的 AnalyzeInfo
-```
-
-
-
-假设目录是：
-
-```
-demo/
-├── frontend/
-│   └── package.json
-├── backend/
-│   └── pyproject.toml
-└── broken-worker/
-    └── package.json
-```
-
-执行：
-
-```
-analysis = analyze_project_modules("/demo")
-```
-
-
-流程为：
-```mermaid
-flowchart TD
-    A["analyze_project_modules"] --> B["os.walk 扫描全部目录"]
-    B --> C["detect_project_type"]
-    C --> D["ProjectInfo"]
-    D --> E["build_framework_info"]
-    E --> F["FrameworkInfo"]
-    F --> G["ProjectModule"]
-    G --> H["ProjectAnalysis.modules"]
-
-    C -->|ProjectDetectionError| I["unknown ProjectModule"]
-    E -->|PARSER_ERRORS| I
-    I --> J["ProjectAnalysis.warnings"]
-```
-
-
-最终结果类似：
-
-```
-ProjectAnalysis(
-    root_path="/demo",
-    modules=[
-        ProjectModule(
-            root_path="/demo/frontend",
-            source_file="package.json",
-            framework_info=FrameworkInfo(
-                project_type=ProjectType.FRONTEND,
-                language=Language.TYPESCRIPT,
-            ),
-        ),
-        ProjectModule(
-            root_path="/demo/backend",
-            source_file="pyproject.toml",
-            framework_info=FrameworkInfo(
-                project_type=ProjectType.BACKEND,
-                language=Language.PYTHON,
-            ),
-        ),
-        ProjectModule(
-            root_path="/demo/broken-worker",
-            source_file="package.json",
-            framework_info=FrameworkInfo(),
-        ),
-    ],
-    warnings=[
-        "broken-worker/package.json 解析失败：...",
-    ],
-)
-```
-
-计算整体类型时：
-
-```
-known_types = {
-    ProjectType.FRONTEND,
-    ProjectType.BACKEND,
-}
-```
-
-unknown 模块被忽略，因此：
-
-```
-analysis.primary_type is ProjectType.MIXED
-```
-
-
-
-## ProjectInfo 和 FrameworkInfo 有什么区别
-
-这是目前最容易混淆的地方。
-
-### ProjectInfo：检测过程中的中间结果
-
-```
-ProjectInfo(
-    project_type=ProjectType.BACKEND,
-    language=Language.JAVASCRIPT,
-    source_file="package.json",
-    target_analysis="json",
-    file_content="...",
-)
-```
-
-它表达：
-
-> 我通过哪个文件，初步判断这是什么项目，并保留后续解析需要的原始内容。
-
-其中：
-
-- `source_file`：依据来自哪个文件；
-- `target_analysis`：应该用什么解析器；
-- `file_content`：标志文件原始内容。
-
-### FrameworkInfo：最终标准化结果
-
-```
-FrameworkInfo(
-    project_type=ProjectType.BACKEND,
-    language=Language.JAVASCRIPT,
-    frameworks=["Express"],
-    test_frameworks=[TestFramework.VITEST],
-)
-```
-
-它表达：
-
-> 完整分析后，这个项目具有什么属性。
-
-可以记成：
-
-```
-ProjectInfo   = 检测过程中的证据
-FrameworkInfo = 检测完成后的结论
-```
+`poetry build` 只在本地生成 wheel 和源码发行包，不会发布到 PyPI。

@@ -1,3 +1,5 @@
+> 历史设计，非当前使用文档。当前结构见 `docs/project-structure.md`，当前操作方式见 `docs/user-guide.md`。
+
 ## 概述
 
 `test-assistant` 是一个基于 LangChain 生态构建的智能测试 CLI 工具 + Web Dashboard。它能够绑定一个开发项目，自动分析项目结构，LLM 驱动生成多类型测试用例，经用户确认后执行，并在迭代过程中持续增量更新。
