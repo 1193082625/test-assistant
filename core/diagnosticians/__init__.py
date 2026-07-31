@@ -1,1 +1,7 @@
-"""失败归因、重复运行、基线比较"""
+"""测试失败的确定性诊断服务。"""
+
+from .execution import diagnose_execution_preflight
+
+__all__ = [
+    "diagnose_execution_preflight",
+]

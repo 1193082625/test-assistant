@@ -1,7 +1,13 @@
 import subprocess
+import sys
 
 from core.executors import select_executor, VitestExecutor
-from core.executors.base import ExecutionReport, BaseExecutor, TestResult as ExecutionTestResult
+from core.executors.base import (
+    ExecutionReport,
+    BaseExecutor,
+    ExecutionEnvironment,
+    TestResult as ExecutionTestResult,
+)
 from core.executors.pytest_executor import PytestExecutor
 
 def test_select_executor_returns_pytest_executor():
@@ -210,3 +216,71 @@ def test_select_executor_rejects_language_framework_mismatch():
         "不支持的执行器组合: "
         "language=javascript, framework=pytest"
     )
+
+def test_pytest_executor_reports_environment_summary(
+    monkeypatch,
+):
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout="1 passed",
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        "core.executors.pytest_executor.subprocess.run",
+        fake_run,
+    )
+
+    executor = PytestExecutor(cwd="/demo")
+    report = executor.execute(
+        "test_demo.py"
+    )
+
+    assert report.environment is not None
+    assert (
+        report.environment.runner
+        == "pytest"
+    )
+    assert (
+        report.environment.runtime
+        == "python"
+    )
+    assert report.environment.runtime_version
+    assert (
+        report.environment.working_directory
+        == "/demo"
+    )
+
+def test_pytest_executor_uses_current_python(
+    monkeypatch,
+):
+    commands = []
+
+    def fake_run(*args, **kwargs):
+        commands.append(args[0])
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout="1 passed",
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        "core.executors.pytest_executor.subprocess.run",
+        fake_run,
+    )
+
+    executor = PytestExecutor(cwd="/demo")
+    executor.execute("test_demo.py")
+
+    assert len(commands) == 1
+    assert commands[0][0] == sys.executable
+    assert commands[0][1:] == [
+        "-m",
+        "pytest",
+        "test_demo.py",
+        "-v",
+        "--tb=short",
+    ]

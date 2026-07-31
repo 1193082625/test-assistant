@@ -11,6 +11,16 @@ class TestResult:
     duration: float # 执行耗时（秒）
     message: str = "" # 失败时的错误信息
 
+
+@dataclass(frozen=True)
+class ExecutionEnvironment:
+    """一次测试执行使用的最小环境摘要。"""
+    runner: str
+    runtime: str
+    runtime_version: str
+    working_directory: str | None
+
+
 @dataclass
 class ExecutionReport:
     """一次测试命令的完整执行报告"""
@@ -20,6 +30,7 @@ class ExecutionReport:
     exit_code: int | None = None
     timed_out: bool = False
     error_type: str | None = None
+    environment: ExecutionEnvironment | None = None
 
     @property
     def successful(self) -> bool:
@@ -29,6 +40,7 @@ class ExecutionReport:
             and self.timed_out is False
             and self.error_type is None
         )
+
 
 def normalize_process_output(output: str | bytes | None) -> str:
     """将子进程输出统一转换为字符串"""
@@ -40,6 +52,7 @@ def normalize_process_output(output: str | bytes | None) -> str:
         return output.decode("utf-8", errors="replace")
 
     return output
+
 
 class BaseExecutor(ABC):
     """执行器抽象基类"""

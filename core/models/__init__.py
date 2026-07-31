@@ -30,6 +30,16 @@ from .impact import TestSelection
 
 from .test_spec import ExpectationEvidence, TestSpec, build_test_spec_id
 from .planner import PlannerResult
+from .diagnosis import (
+    Diagnosis,
+    DiagnosisCategory,
+    DiagnosisConfidence,
+    DiagnosisEvidence,
+    DiagnosisEvidenceKind,
+    DiagnosisLocation,
+    DiagnosisAction,
+    DiagnosisActionKind,
+)
 
 __all__ = [
     "FrameworkInfo",
@@ -55,5 +65,13 @@ __all__ = [
     "TestSpec",
     "build_test_spec_id",
     "PlannerResult",
-    "PlannerStatus"
+    "PlannerStatus",
+    "Diagnosis",
+    "DiagnosisCategory",
+    "DiagnosisConfidence",
+    "DiagnosisEvidence",
+    "DiagnosisEvidenceKind",
+    "DiagnosisLocation",
+    "DiagnosisAction",
+    "DiagnosisActionKind",
 ]
