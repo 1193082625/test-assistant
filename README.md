@@ -1,8 +1,9 @@
 # test-assistant
 
-`test-assistant` 当前的 M0 版本面向 Python + pytest 项目，提供可解释、可复现的增量测试选择与执行闭环。
+`test-assistant` 当前的 `v0.4.0` 候选版面向 Python + pytest
+项目，提供人工审批的测试生成、可解释的增量执行和证据驱动的失败诊断闭环。
 
-## M0 核心流程
+## 核心流程
 
 ```mermaid
 flowchart LR
@@ -32,6 +33,12 @@ flowchart LR
 - 只执行选中的测试文件，不遍历旧候选测试目录；
 - 测试成功后原子提交快照，失败时保留旧基线；
 - 测试环境默认关闭 LangSmith 网络追踪。
+- TestSpec 必须人工批准后才能生成候选测试；
+- 候选测试经过静态、收集、Runner 和隔离执行门禁；
+- 正式测试写入前必须显示 diff 并再次人工确认；
+- 区分产品缺陷、测试缺陷、基础设施故障、Flaky 和证据不足；
+- 诊断包含置信度、证据、位置、建议动作和复现命令；
+- 诊断记录使用版本化 JSON 原子保存，并可生成脱敏 Markdown 报告。
 
 ## 使用方式
 
@@ -56,6 +63,22 @@ poetry run test-assistant inspect --path .
 poetry run test-assistant run --path .
 ```
 
+查看 TestSpec、生成候选并人工确认：
+
+```bash
+poetry run test-assistant plan --help
+poetry run test-assistant generate --help
+```
+
+解释已保存的诊断、查看状态并生成报告：
+
+```bash
+poetry run test-assistant diagnose \
+  --input .autotest/diagnoses/latest.json
+poetry run test-assistant status --path .
+poetry run test-assistant report --path .
+```
+
 运行项目测试套件：
 
 ```bash
@@ -68,6 +91,10 @@ poetry run pytest -q
 - 当前只建立可静态确认的直接测试映射；
 - 删除 Python 源码或分析失败时会安全降级为正式 pytest 测试全集；
 - 没有直接测试映射的源码会保留警告，等待后续 TestSpec 流程；
+- `PRODUCT_DEFECT` 只在已批准的强契约、全部测试门禁通过、
+  同环境三次稳定断言失败时成立；其余证据不足场景返回 `INCONCLUSIVE`；
+- Web Dashboard、监听模式和 Vitest 测试生成尚未进入受支持主流程；
+- 默认测试不调用真实 LLM，真实模型验证仅作为可选 smoke test。
 
 ## 项目的代码地图
 
