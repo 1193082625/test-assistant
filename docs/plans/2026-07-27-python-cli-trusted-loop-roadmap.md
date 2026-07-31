@@ -210,6 +210,7 @@ core/
   executors/       正式测试与隔离测试执行
   diagnosticians/  失败分类和证据
   storage/         JSON/后续 SQLite 持久化
+  workflows/       跨生成、验证、审批和提交的确定性应用工作流
   graphs/          固定工作流编排
 ```
 
@@ -537,6 +538,54 @@ M3 不预先固定完整实施顺序。完成 M2 并获得真实使用反馈后�
 | 18 | 隔离门禁 | 实现 Runner 健康检查、临时目录执行、超时和副作用结果 | 环境故障与候选测试失败可以区分 |
 | 19 | diff 与提交 | 实现候选 diff、二次批准、原子提交和人工文件保护 | 未批准不落盘，冲突不覆盖，失败可恢复 |
 | 20 | M1 验收 | 完成 plan → approve → generate → validate → approve diff → commit 演示 | M1 全部验收标准通过，版本可标记为 `v0.3.0` |
+
+##### Day 20 实施记录（2026-07-31）
+
+已完成 Core 层可信候选工作流编排：
+
+- `prepare_candidate_for_review()` 负责从已批准 `TestSpec` 生成候选测试；
+- 候选依次经过输出结构、AST、import、pytest 收集、Runner 健康检查和隔离执行门禁；
+- 隔离执行产生的文件副作用必须由 `TestSpec.side_effects` 显式声明；
+- 验证成功后只生成 `CandidateDiff`，不会写入正式测试目录；
+- `commit_reviewed_candidate()` 只接受用户已经审阅的 `CandidateDiff`；
+- 提交前重新验证 diff 和内容摘要，过期 diff、候选变化及正式文件冲突均拒绝提交；
+- 正式文件通过临时文件、`fsync` 和原子创建或替换完成提交。
+
+自动化验收覆盖：
+
+- 未批准计划在生成前短路；
+- 静态验证失败；
+- pytest 收集失败；
+- Runner 健康检查失败；
+- 隔离执行测试失败；
+- 未声明与已声明的文件系统副作用；
+- 成功生成 diff 且正式目录保持不变；
+- 人工确认后的成功提交；
+- 过期 diff 拒绝；
+- 提交阶段文件系统错误。
+
+验证结果：
+
+```text
+poetry run pytest tests/test_candidate_workflow.py -q
+12 passed
+
+poetry run pytest tests/test_cli_generate.py -q
+6 passed
+
+poetry run pytest -q
+336 passed
+```
+当前状态：
+
+- Day 20 Core 编排和自动化测试完成；
+- CLI 已完成
+  `plan approve → generate → validate → review diff → commit`
+  的 fixture 垂直闭环演示；
+- CLI 演示使用 fake LLM 和真实 pytest 门禁，不依赖外部网络；
+- 用户拒绝时正式测试保持不变，用户确认后才执行原子提交；
+- M1 全部验收标准通过，当前代码具备标记为 `v0.3.0`
+  可信候选版的条件。
 
 #### v0.4.0 / M2：执行诊断版（Day 21～27）
 
