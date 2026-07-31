@@ -7,9 +7,7 @@ import yaml
 
 from core.models import FrameworkInfo
 from core.analyzers.framework import EXCLUDE_DIRS, analyze_project
-from core.analyzers.snapshot import take_snapshot, Snapshot, SnapshotManifest, commit_snapshot_manifest
-
-from cli.commands.framework_suggestion import generate_test_plan
+from core.analyzers.snapshot import take_snapshot, Snapshot, commit_snapshot_manifest
 
 # 测试用例持久化到项目 `.autotest/` 目录，可直接被项目引用
 AUTOTEST_DIR = ".autotest"
@@ -211,9 +209,6 @@ def init(path, name, mode):
         click.echo(f"\n✅ 项目已绑定：{project_name}")
         click.echo(f"  .autotest/ → {result['autotest_path']}")
 
-        snapshots_files = [s.path for s in snapshots]
-        result = generate_test_plan(snapshots_files, target_path)
-        print(result)
     except Exception as e:
         click.echo(f"✗ 初始化失败：{e}")
         cleanup_autotest(target_path)

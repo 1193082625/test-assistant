@@ -28,8 +28,6 @@ build-backend = "poetry.core.masonry.api"
 packages = [
     { include = "cli" },
     { include = "core" },
-    { include = "web" },
-    { include = "reports" },
 ]
 
 [dependency-groups]
