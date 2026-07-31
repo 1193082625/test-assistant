@@ -1,4 +1,7 @@
-"""将稳定测试失败与契约和测试门禁证据关联。"""
+"""
+将稳定测试失败与契约和测试门禁证据关联。
+attribution 归因，归属
+"""
 
 from core.executors.base import ExecutionReport
 from core.models import (
@@ -152,6 +155,13 @@ def diagnose_stable_failure(
     ):
         raise ValueError("source_path 不能为空")
 
+    validation_diagnosis = _validation_diagnosis(
+        validation_results=validation_results,
+        test_node_id=test_node_id,
+    )
+    if validation_diagnosis is not None:
+        return validation_diagnosis
+
     repeatability = diagnose_repeatability(
         reports=reports,
         test_node_id=test_node_id,
@@ -161,13 +171,6 @@ def diagnose_stable_failure(
         DiagnosisCategory.FLAKY,
     }:
         return repeatability
-
-    validation_diagnosis = _validation_diagnosis(
-        validation_results=validation_results,
-        test_node_id=test_node_id,
-    )
-    if validation_diagnosis is not None:
-        return validation_diagnosis
 
     all_gates_passed = (
         bool(validation_results)

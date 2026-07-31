@@ -1,4 +1,7 @@
-"""源文件到测试的影响映射"""
+"""
+源文件到测试的影响映射
+impact 影响
+"""
 from pathlib import Path
 from core.models import (
     SourceSymbol,

@@ -66,9 +66,39 @@ poetry run test-assistant run --path .
 查看 TestSpec、生成候选并人工确认：
 
 ```bash
-poetry run test-assistant plan --help
-poetry run test-assistant generate --help
+poetry run test-assistant plan propose demo.add \
+  --path /path/to/project \
+  --source-path demo.py \
+  --module-path demo
+
+poetry run test-assistant plan list \
+  --path /path/to/project
+
+poetry run test-assistant plan show SPEC_ID \
+  --path /path/to/project
+
+poetry run test-assistant plan approve SPEC_ID \
+  --path /path/to/project
+
+poetry run test-assistant generate SPEC_ID \
+  --path /path/to/project \
+  --module-path demo \
+  --source-path demo.py \
+  --test-filename test_demo.py
 ```
+
+候选测试通过门禁并确认 diff 后，验证精确 pytest node：
+
+```bash
+poetry run test-assistant verify SPEC_ID \
+  --path /path/to/project \
+  --test-node ".autotest/test_cases/unit/demo.py/test_demo.py::test_add" \
+  --source-path demo.py
+```
+
+`verify` 会重新运行静态、Runner 和精确收集门禁，并只复跑指定
+pytest node 三次。连续三次通过时记录健康状态；失败时归因并保存诊断，
+命令返回非零退出码。
 
 解释已保存的诊断、查看状态并生成报告：
 
@@ -95,6 +125,8 @@ poetry run pytest -q
   同环境三次稳定断言失败时成立；其余证据不足场景返回 `INCONCLUSIVE`；
 - Web Dashboard、监听模式和 Vitest 测试生成尚未进入受支持主流程；
 - 默认测试不调用真实 LLM，真实模型验证仅作为可选 smoke test。
+- `plan propose` 和 `generate` 需要配置 `DEEPSEEK_API_KEY`，以及服务需要时的
+  `DEEPSEEK_BASE_URL`；`verify`、`status`、`diagnose` 和 `report` 不调用 LLM。
 
 ## 项目的代码地图
 

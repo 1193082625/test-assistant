@@ -8,6 +8,7 @@ import click
 from core.models import Diagnosis
 
 
+# diagnosis 诊断
 def load_diagnosis(path: str | Path) -> Diagnosis:
     """从 JSON 文件加载并校验诊断领域对象。"""
     input_path = Path(path)

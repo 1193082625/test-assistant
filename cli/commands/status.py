@@ -6,6 +6,7 @@ import click
 
 
 from .diagnose import load_diagnosis
+from core.repositories import VerificationStateRepository
 
 @click.command()
 @click.option(
@@ -20,6 +21,36 @@ from .diagnose import load_diagnosis
 )
 def status(path: Path) -> None:
     """项目测试健康状态"""
+    try:
+        verification = VerificationStateRepository(
+            path
+        ).load()
+    except (OSError, TypeError, ValueError) as error:
+        raise click.ClickException(
+            f"无法读取验证状态: {error}"
+        ) from error
+    if verification is not None:
+        if verification["status"] == "passed":
+            click.echo("状态: 健康")
+            click.echo("最近验证: 连续 3 次通过")
+            click.echo(
+                "复现命令: "
+                f"{verification['reproduction_command']}"
+            )
+            return
+        click.echo("状态: 需要处理")
+        click.echo(
+            f"最近诊断: {verification['category']}"
+        )
+        click.echo(
+            f"置信度: {verification['confidence']}"
+        )
+        click.echo(
+            "诊断记录: "
+            f"{verification['diagnosis_record']}"
+        )
+        return
+
     latest_path = (
         path.resolve()
         / ".autotest"

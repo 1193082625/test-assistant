@@ -617,6 +617,7 @@ poetry run pytest -q
 - Day 26：完成版本化诊断 JSON、原子写入、latest 记录、Git/依赖/环境摘要和脱敏 Markdown 报告。
 - Day 27：M2 全量回归通过，版本进入 `v0.4.0` 候选阶段。
 - Day 28～30：增加构建验证和 CI，更新 README，移除未实现的 Web/监听空命令。正式发布和 Git 标签仍需在远端 CI 与干净环境安装验收后由维护者执行。
+- 2026-08-01：补齐 `plan propose` 与确定性 `verify`，形成 propose → approve → generate → diff confirm → 三次精确复跑 → diagnose/status/report 的端到端 CLI；成功验证状态与失败诊断历史分开保存。
 
 ### 8.2 日计划调整原则
 

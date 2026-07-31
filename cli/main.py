@@ -8,6 +8,7 @@ from cli.commands.report import report
 from cli.commands.inspect import inspect_command
 from cli.commands.generate import generate_command
 from cli.commands.diagnose import diagnose_command
+from cli.commands.verify import verify_command
 
 # @click.group() 创建一个命令组，相当于 npm 这样的根命令
 @click.group()
@@ -22,6 +23,7 @@ cli.add_command(inspect_command)
 cli.add_command(plan)
 cli.add_command(generate_command)
 cli.add_command(diagnose_command)
+cli.add_command(verify_command)
 cli.add_command(run)
 cli.add_command(status)
 cli.add_command(report)

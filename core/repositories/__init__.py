@@ -11,12 +11,14 @@ from .diagnosis import (
     redact_sensitive_text,
 )
 from .test_spec import TestSpecRepository
+from .verification import VerificationStateRepository
 
 __all__ = [
     "DiagnosisRepository",
     "redact_sensitive_text",
     "CandidateRepository",
     "TestSpecRepository",
+    "VerificationStateRepository",
     "build_candidate_content_digest",
     "CandidateDiff",
     "CandidateApproval",
