@@ -12,6 +12,7 @@ from .diagnosis import (
 )
 from .test_spec import TestSpecRepository
 from .verification import VerificationStateRepository
+from .triage import TriageRepository
 
 __all__ = [
     "DiagnosisRepository",
@@ -22,4 +23,5 @@ __all__ = [
     "build_candidate_content_digest",
     "CandidateDiff",
     "CandidateApproval",
+    "TriageRepository",
 ]

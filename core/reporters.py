@@ -53,3 +53,41 @@ def render_diagnosis_markdown(
         ]
     )
     return "\n".join(lines)
+
+
+def render_triage_markdown(record: dict[str, object]) -> str:
+    """将已脱敏的 triage repository 记录渲染为简洁报告。"""
+    pytest_summary = record["pytest"]
+    lines = [
+        "# Test Assistant Triage 报告",
+        "",
+        f"- Run ID：`{record['run_id']}`",
+        f"- 时间：{record['created_at']}",
+        f"- pytest 退出码：`{pytest_summary['exit_code']}`",
+        f"- 失败簇：`{len(record['clusters'])}`",
+        "",
+        "## pytest 摘要",
+        "",
+    ]
+    counts = pytest_summary.get("status_counts", {})
+    if counts:
+        lines.extend(
+            f"- {status}: {count}"
+            for status, count in sorted(counts.items())
+        )
+    else:
+        lines.append("- 没有测试结果")
+    lines.extend(["", "## 诊断记录", ""])
+    references = record.get("diagnosis_references", [])
+    lines.extend(
+        f"- `{reference}`" for reference in references
+    )
+    if not references:
+        lines.append("- 无")
+    if record.get("truncation", {}).get("occurred"):
+        lines.extend([
+            "",
+            "> 部分运行输出已按安全限制截断。",
+        ])
+    lines.append("")
+    return "\n".join(lines)
