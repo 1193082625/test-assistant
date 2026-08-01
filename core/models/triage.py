@@ -1,9 +1,16 @@
 """pytest 套件执行产生的稳定分诊事件模型。"""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from .diagnosis import DiagnosisLocation
+
+if TYPE_CHECKING:
+    from core.executors.base import ExecutionReport
+    from .diagnosis import Diagnosis
 
 
 class TriagePhase(StrEnum):
@@ -62,3 +69,48 @@ class PytestIssue:
                 for location in locations
             ),
         )
+
+
+@dataclass(frozen=True)
+class FailureCluster:
+    """共享同一稳定失败模式的一组 pytest 问题。"""
+
+    fingerprint: str
+    representative_node: str | None
+    issues: tuple[PytestIssue, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.fingerprint, str) or not self.fingerprint:
+            raise ValueError("FailureCluster fingerprint 不能为空")
+        if not self.issues or any(
+            not isinstance(issue, PytestIssue) for issue in self.issues
+        ):
+            raise ValueError("FailureCluster issues 必须包含 PytestIssue")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "fingerprint": self.fingerprint,
+            "representative_node": self.representative_node,
+            "issues": [issue.to_dict() for issue in self.issues],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "FailureCluster":
+        issues = data.get("issues", [])
+        if not isinstance(issues, list):
+            raise ValueError("FailureCluster issues 必须是列表")
+        return cls(
+            fingerprint=data["fingerprint"],
+            representative_node=data.get("representative_node"),
+            issues=tuple(PytestIssue.from_dict(issue) for issue in issues),
+        )
+
+
+@dataclass(frozen=True)
+class TriageResult:
+    """一次已有测试套件分诊的稳定结果。"""
+
+    run_id: str
+    report: ExecutionReport
+    clusters: tuple[FailureCluster, ...]
+    diagnoses: tuple[Diagnosis, ...]

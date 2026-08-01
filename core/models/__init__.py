@@ -44,7 +44,12 @@ from .diagnosis import (
     DiagnosisAction,
     DiagnosisActionKind,
 )
-from .triage import PytestIssue, TriagePhase
+from .triage import (
+    FailureCluster,
+    PytestIssue,
+    TriagePhase,
+    TriageResult,
+)
 
 __all__ = [
     "FrameworkInfo",
@@ -83,4 +88,6 @@ __all__ = [
     "DiagnosisActionKind",
     "PytestIssue",
     "TriagePhase",
+    "FailureCluster",
+    "TriageResult",
 ]

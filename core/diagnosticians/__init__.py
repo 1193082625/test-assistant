@@ -6,10 +6,20 @@ from .repeatability import (
     diagnose_repeatability,
     repeat_test_execution,
 )
+from .clustering import (
+    FailureCluster,
+    cluster_pytest_issues,
+    failure_fingerprint,
+    normalize_failure_message,
+)
 
 __all__ = [
     "diagnose_stable_failure",
     "diagnose_execution_preflight",
     "diagnose_repeatability",
     "repeat_test_execution",
+    "FailureCluster",
+    "cluster_pytest_issues",
+    "failure_fingerprint",
+    "normalize_failure_message",
 ]
