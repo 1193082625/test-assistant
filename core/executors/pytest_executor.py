@@ -95,8 +95,18 @@ class PytestExecutor(BaseExecutor):
         self,
         test_path: str | None = None,
         timeout: float = 120,
+        max_failures: int | None = None,
     ) -> PytestSuiteResult:
         """执行 pytest 套件，并通过 hook JSON 返回结构化事件。"""
+        if (
+            max_failures is not None
+            and (
+                not isinstance(max_failures, int)
+                or isinstance(max_failures, bool)
+                or max_failures < 1
+            )
+        ):
+            raise ValueError("max_failures 必须是正整数或 None")
         environment = ExecutionEnvironment(
             runner="pytest",
             runtime="python",
@@ -110,6 +120,8 @@ class PytestExecutor(BaseExecutor):
             command = [sys.executable, "-m", "pytest"]
             if test_path is not None:
                 command.append(test_path)
+            if max_failures is not None:
+                command.append(f"--maxfail={max_failures}")
             command.extend([
                 "-q",
                 "--tb=short",

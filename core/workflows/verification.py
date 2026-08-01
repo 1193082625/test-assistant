@@ -42,7 +42,7 @@ class VerificationResult:
     record_path: Path | None = None
 
 
-def _read_git_sha(project_root: Path) -> str | None:
+def read_git_sha(project_root: Path) -> str | None:
     try:
         completed = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -60,7 +60,7 @@ def _read_git_sha(project_root: Path) -> str | None:
     return value or None
 
 
-def _dependency_digest(project_root: Path) -> str | None:
+def build_dependency_digest(project_root: Path) -> str | None:
     dependency_files = (
         "poetry.lock",
         "requirements.txt",
@@ -157,8 +157,8 @@ def verify_test_spec(
         diagnosis=diagnosis,
         execution_reports=reports,
         reproduction_command=reproduction_command,
-        git_sha=_read_git_sha(root),
-        dependency_digest=_dependency_digest(root),
+        git_sha=read_git_sha(root),
+        dependency_digest=build_dependency_digest(root),
     )
     VerificationStateRepository(root).save(
         status=VerificationStatus.DIAGNOSED.value,

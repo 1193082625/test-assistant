@@ -225,7 +225,9 @@ def triage_pytest_suite(
     if preflight is not None and (
         suite.report.error_type not in {"test_failure", None}
     ) and not any(
-        issue.phase is TriagePhase.COLLECTION for issue in suite.issues
+        issue.phase is TriagePhase.COLLECTION
+        and issue.outcome == "error"
+        for issue in suite.issues
     ):
         return TriageResult(
             run_id=run_id or uuid4().hex,
