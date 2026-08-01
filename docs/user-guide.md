@@ -1,6 +1,6 @@
 # test-assistant 真实项目使用指南
 
-> 当前版本：`v0.4.0` 候选版
+> 当前版本：`v0.5.0`
 >
 > 更新日期：2026-08-01
 >
@@ -12,6 +12,7 @@
 安装
 → init
 → inspect
+→ triage（已有套件，可独立使用）
 → plan propose
 → 人工审批
 → generate
@@ -61,14 +62,14 @@ poetry build
 成功后生成：
 
 ```text
-dist/test_assistant-0.4.0-py3-none-any.whl
-dist/test_assistant-0.4.0.tar.gz
+dist/test_assistant-0.5.0-py3-none-any.whl
+dist/test_assistant-0.5.0.tar.gz
 ```
 
 记下 wheel 的绝对路径，例如：
 
 ```text
-/absolute/path/to/test-assistant/dist/test_assistant-0.4.0-py3-none-any.whl
+/absolute/path/to/test-assistant/dist/test_assistant-0.5.0-py3-none-any.whl
 ```
 
 `poetry build` 只生成本地安装包，不会上传或发布。
@@ -127,7 +128,7 @@ python -m pytest --version
 
 ```bash
 python -m pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.4.0-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.5.0-py3-none-any.whl
 ```
 
 验证：
@@ -152,7 +153,7 @@ poetry run python -m pytest --version
 
 ```bash
 poetry run pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.4.0-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.5.0-py3-none-any.whl
 ```
 
 验证：
@@ -193,7 +194,7 @@ export DEEPSEEK_BASE_URL="https://your-openai-compatible-endpoint"
 下面的命令不调用 LLM：
 
 ```text
-init  inspect  run  verify  status  diagnose  report
+init  inspect  run  triage  verify  status  diagnose  report
 ```
 
 ## 6. 初始化目标项目
@@ -249,6 +250,32 @@ test-assistant run --path .
 ```
 
 第一次真实试用可以先完成 TestSpec 闭环，再单独评估 `run`。
+
+### `run`、`verify` 与 `triage` 的职责边界
+
+| 命令 | 输入 | 用途 | 是否需要 TestSpec |
+| --- | --- | --- | --- |
+| `run` | snapshot 变更 | 选择并执行受影响的已有测试 | 否 |
+| `verify` | 已批准 spec + 精确 node | 验证新生成或指定测试三次 | 是 |
+| `triage` | 已有 pytest suite/file/node | 聚类、复跑并归因现有失败 | 否 |
+
+`triage` 不调用 LLM，也不会修改产品源码、正式测试、TestSpec 审批状态或 snapshot：
+
+```bash
+test-assistant triage --path .
+test-assistant triage --path . --test-path tests/test_service.py
+test-assistant triage --path . \
+  --test-node tests/test_service.py::test_case
+test-assistant triage --path . --max-failures 10
+```
+
+`--test-path` 与 `--test-node` 互斥，且测试路径必须位于目标项目内。退出码定义：
+
+- `0`：没有未解决问题；
+- `1`：存在诊断，或 pytest 未收集到测试；
+- `2`：参数、Runner、环境或持久化错误。
+
+运行记录保存在 `.autotest/triage/<run-id>.json` 和 `latest.json`。失败诊断继续保存在 `.autotest/diagnoses/`，可使用 `diagnose` 与 `report` 查看。
 
 ## 8. 确定 source path、module path 和目标符号
 
@@ -527,7 +554,7 @@ python -m pytest -q
 ```bash
 python -m pip install \
   --upgrade \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.4.0-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.5.0-py3-none-any.whl
 ```
 
 卸载 CLI：
@@ -598,6 +625,11 @@ python -m pytest path/to/test_file.py --collect-only -q
 不是。仓库自动化测试使用 fake LLM，避免网络和模型波动。真实模型只作为显式试用或 smoke test。
 
 ## 19. 当前限制
+
+- `triage` 首版只支持 Python/pytest，不调用 LLM，也不自动修复；
+- 只有当前源码与历史等明确证据确认能力已移除时，才可判旧测试为 `TEST_DEFECT`；
+- 契约冲突保持 `INCONCLUSIVE` 并请求人工确认；
+- 旧 snapshot 不含符号摘要时，`inspect` 会明确降级为 `file_level` 保守分析；
 
 - 可信生成和符号归因主流程只支持 Python 3.13 + pytest；
 - Web Dashboard 和 watch 尚未实现；

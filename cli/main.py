@@ -14,7 +14,7 @@ from cli.commands.triage import triage_command
 # @click.group() 创建一个命令组，相当于 npm 这样的根命令
 @click.group()
 def cli():
-    """test-assistant: LLM 驱动的智能测试工具"""
+    """test-assistant: Python/pytest 可信测试与分诊工具"""
     pass
 
 

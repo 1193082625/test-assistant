@@ -2,7 +2,7 @@
 
 `test-assistant` 是一个面向 Python/pytest 项目的本地智能测试 CLI。
 
-当前 `v0.4.0` 候选版提供一条可信的测试闭环：分析源码和契约、生成可审阅的 TestSpec、隔离候选测试、执行质量门禁、人工确认 diff，并对失败给出有证据的诊断。
+当前 `v0.5.0` 提供两条相互独立的可信闭环：为新测试执行 TestSpec 审批与候选门禁，以及对项目已有 pytest 套件执行结构化分诊、失败聚类、三次精确复跑和证据归因。
 
 ## 当前能力
 
@@ -13,8 +13,10 @@
 - 候选测试经过静态、导入、收集、Runner、隔离执行和副作用门禁；
 - 正式测试写入前展示 diff，并要求第二次人工确认；
 - 对指定 pytest node 精确复跑三次；
+- 对已有 pytest 套件解析 collection、setup、call、skip 和 warning 事件；
+- 按稳定指纹聚类失败，并用代表 node 精确复跑三次；
 - 区分产品缺陷、测试缺陷、基础设施故障、Flaky 和证据不足；
-- 原子保存 TestSpec、候选、验证状态和脱敏诊断报告。
+- 原子保存 TestSpec、候选、验证状态、脱敏诊断和 triage 运行记录。
 
 ## 安全原则
 
@@ -30,6 +32,7 @@ TestSpec 人工审批
 - 未批准的 TestSpec 不能生成测试；
 - 未通过门禁或未确认 diff 的候选不能进入正式测试目录；
 - `verify` 只执行用户指定的精确 pytest node；
+- `triage` 不修改源码、正式测试、TestSpec 或 snapshot；
 - 证据不足时返回 `INCONCLUSIVE`，不以高置信度猜测；
 - 工具不会自动修改产品源码或自动批准业务预期。
 
@@ -59,7 +62,7 @@ export DEEPSEEK_BASE_URL="https://your-api-endpoint"
 
 `DEEPSEEK_BASE_URL` 应指向所使用的 OpenAI 兼容服务地址。不要把密钥提交到 Git。
 
-`init`、`inspect`、`run`、`verify`、`status`、`diagnose` 和 `report` 不调用 LLM。
+`init`、`inspect`、`run`、`triage`、`verify`、`status`、`diagnose` 和 `report` 不调用 LLM。
 
 ## 快速开始
 
@@ -181,6 +184,26 @@ poetry run test-assistant run \
 
 它与 TestSpec 的 `propose → approve → generate → verify` 生命周期可以分别使用。
 
+## 分诊已有 pytest 套件
+
+`triage` 不要求 TestSpec，也不使用 LLM。它运行已有套件、结构化解析 pytest 生命周期事件、聚类失败并对代表 node 复跑三次：
+
+```bash
+poetry run test-assistant triage --path /path/to/demo-project
+poetry run test-assistant triage --path /path/to/demo-project \
+  --test-path tests/test_service.py --max-failures 10
+poetry run test-assistant triage --path /path/to/demo-project \
+  --test-node tests/test_service.py::test_case
+```
+
+`--test-path` 与 `--test-node` 互斥。退出码 `0` 表示没有未解决问题，`1` 表示存在诊断或未收集到测试，`2` 表示参数、Runner、环境或持久化错误。记录保存在 `.autotest/triage/`，并对密钥、项目绝对路径和大型输出做脱敏或截断。
+
+三个执行入口的边界：
+
+- `run`：基于 snapshot 选择受变更影响的已有测试；
+- `verify`：验证一个已批准 TestSpec 对应的精确 node；
+- `triage`：分析已有 pytest 套件，不要求或修改 TestSpec。
+
 ## 目标项目工作区
 
 初始化和后续命令会维护：
@@ -193,6 +216,7 @@ poetry run test-assistant run \
 ├── candidates/             隔离候选及 metadata
 ├── test_cases/unit/        人工确认后的正式测试
 ├── diagnoses/              诊断历史与 latest.json
+├── triage/                 版本化套件分诊记录与 latest.json
 ├── verification/           最近一次验证状态
 └── reports/                Markdown 报告
 ```
@@ -203,6 +227,7 @@ poetry run test-assistant run \
 - Web Dashboard 和 watch 尚未实现；
 - Vitest 执行器不属于当前 TestSpec 生成闭环；
 - 没有已批准强契约时，稳定失败通常返回 `INCONCLUSIVE`；
+- v0.5.0 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
 - 当前使用版本化 JSON，尚未引入 SQLite 或远程服务；
 - 真实 LLM 验证是显式 smoke test，不属于默认自动化测试。
 

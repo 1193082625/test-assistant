@@ -1,6 +1,6 @@
 # test-assistant Python CLI 可信闭环实施路线图
 
-> 状态：当前执行路线图  
+> 状态：v0.5.0 发布验收完成，后续按真实反馈推进
 > 制定日期：2026-07-27  
 > 适用范围：当前仓库主线实现  
 > 上位设计：`docs/plans/2026-07-20-auto-test-design-v2.md`
@@ -175,6 +175,7 @@
 | `v0.2.0` | M0 | 可复现分析版 | 能解释项目、变更、符号、证据和应该运行的已有测试 |
 | `v0.3.0` | M1 | 可信候选版 | TestSpec、两阶段审批、候选区和质量门禁形成闭环 |
 | `v0.4.0` | M2 | 诊断候选版 | pytest 执行、五类诊断、状态和报告形成闭环 |
+| `v0.5.0` | M3 | 真实项目分诊版 | 实例方法映射、结构化 suite 分诊、失败聚类、脱敏记录和 CLI |
 | `v1.0.0` | M0～M2 + 发布门 | Python CLI 正式版 | 核心链路可安装、可恢复、可验证、可安全试用 |
 | `v1.1+` | M3 增量扩展 | 反馈驱动版本 | Vitest、watch、历史或 Web 按真实需求逐项加入 |
 | `v2.0.0` | 后续重大扩展 | 多语言/多运行时版本 | 多测试类型、受限 Agent 或协作模型形成稳定协议 |
@@ -618,6 +619,7 @@ poetry run pytest -q
 - Day 27：M2 全量回归通过，版本进入 `v0.4.0` 候选阶段。
 - Day 28～30：增加构建验证和 CI，更新 README，移除未实现的 Web/监听空命令。正式发布和 Git 标签仍需在远端 CI 与干净环境安装验收后由维护者执行。
 - 2026-08-01：补齐 `plan propose` 与确定性 `verify`，形成 propose → approve → generate → diff confirm → 三次精确复跑 → diagnose/status/report 的端到端 CLI；成功验证状态与失败诊断历史分开保存。
+- 2026-08-01：完成 `v0.5.0` 真实项目分诊：`self.service.method()` 映射、符号级 snapshot、pytest hook JSON、稳定失败聚类、三次代表 node 复跑、五类归因、脱敏 triage repository 与 `triage` CLI。真实 `fitstyle-backend` 只读 smoke 成功选择 `tests/test_cold_start_service.py`。
 
 ### 8.2 日计划调整原则
 

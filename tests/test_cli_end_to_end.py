@@ -1,4 +1,6 @@
 import json
+import shutil
+from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -6,6 +8,10 @@ import cli.commands.generate as generate_module
 import cli.commands.plan as plan_module
 from cli.main import cli
 from core.repositories import TestSpecRepository as SpecRepository
+from core.models import (
+    TestSpec as Spec,
+    TestSpecStatus as SpecStatus,
+)
 
 
 class FakeLLM:
@@ -130,3 +136,109 @@ def test_cli_runs_propose_approve_generate_verify_flow(
     )
     assert health.exit_code == 0, health.output
     assert "状态: 健康" in health.output
+
+
+def test_cli_inspect_triage_diagnose_report_preserves_project_state(
+    tmp_path,
+):
+    fixture = (
+        Path(__file__).parent
+        / "fixtures"
+        / "real_project_triage"
+        / "instance_method_mapping"
+    )
+    project = tmp_path / "triage-project"
+    shutil.copytree(fixture, project)
+    (project / "case.py").rename(project / "test_case.py")
+    (project / "pyproject.toml").write_text(
+        (
+            '[project]\nname = "triage-project"\n'
+            'version = "0.0.0"\n'
+            'dependencies = ["pytest"]\n'
+        ),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+
+    initialized = runner.invoke(
+        cli,
+        ["init", "--path", str(project), "--mode", "auto"],
+    )
+    assert initialized.exit_code == 0, initialized.output
+
+    service = project / "app/service.py"
+    service.write_text(
+        service.read_text(encoding="utf-8").replace(
+            "        return any(value > 0 for value in values.values())\n",
+            "        return None\n",
+        ),
+        encoding="utf-8",
+    )
+    spec = Spec(
+        id="spec-triage-preserved",
+        target_symbol="app.service.Service.rule",
+        behavior="返回布尔匹配结果",
+        arrange={"values": []},
+        action="调用 rule",
+        expected={"return": False},
+        status=SpecStatus.APPROVED,
+    )
+    spec_path = SpecRepository(str(project)).save(spec)
+
+    inspected = runner.invoke(
+        cli, ["inspect", "--path", str(project)]
+    )
+    assert inspected.exit_code == 0, inspected.output
+    assert "app.service.Service.rule" in inspected.output
+    assert "test_case.py" in inspected.output
+
+    protected_paths = (
+        service,
+        project / "test_case.py",
+        spec_path,
+        project / ".autotest/snapshot.json",
+    )
+    before = {
+        path: path.read_bytes() for path in protected_paths
+    }
+
+    triaged = runner.invoke(
+        cli,
+        [
+            "triage",
+            "--path",
+            str(project),
+            "--test-path",
+            "test_case.py",
+        ],
+    )
+    assert triaged.exit_code == 1, triaged.output
+    assert "失败簇:" in triaged.output
+    assert "inconclusive" in triaged.output
+
+    diagnosis_path = project / ".autotest/diagnoses/latest.json"
+    diagnosed = runner.invoke(
+        cli,
+        ["diagnose", "--input", str(diagnosis_path)],
+    )
+    assert diagnosed.exit_code == 0, diagnosed.output
+    assert "诊断: inconclusive" in diagnosed.output
+
+    report_path = project / "triage-report.md"
+    reported = runner.invoke(
+        cli,
+        [
+            "report",
+            "--path",
+            str(project),
+            "--output",
+            str(report_path),
+        ],
+    )
+    assert reported.exit_code == 0, reported.output
+    assert "Test Assistant 诊断报告" in report_path.read_text(
+        encoding="utf-8"
+    )
+    assert {
+        path: path.read_bytes() for path in protected_paths
+    } == before
