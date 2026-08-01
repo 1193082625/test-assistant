@@ -6,10 +6,16 @@ from core.analyzers.impact import (
 )
 
 from core.models import (
+    ImpactAnalysisPrecision,
     TestIndex as Index,
     TestIndexEntry as IndexEntry,
     TestSelection as Selection,
     TestSelectionMode as SelectionMode
+)
+from core.analyzers.snapshot import (
+    Snapshot,
+    compare_snapshots,
+    take_snapshot,
 )
 
 def test_finds_tests_for_changed_source_symbol():
@@ -719,3 +725,216 @@ def test_selects_test_using_instance_from_setup_method(
         "app.service.Service.rule -> " in evidence
         for evidence in selection.evidence
     )
+
+
+def test_symbol_snapshot_selects_only_modified_method(
+    tmp_path,
+):
+    source_path = tmp_path / "service.py"
+    source_path.write_text(
+        (
+            "def changed():\n"
+            "    return True\n"
+            "\n"
+            "def unchanged():\n"
+            "    return 1\n"
+        ),
+        encoding="utf-8",
+    )
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+    (tests_path / "test_service.py").write_text(
+        (
+            "from service import changed, unchanged\n"
+            "\n"
+            "def test_changed():\n"
+            "    assert changed() is False\n"
+            "\n"
+            "def test_unchanged():\n"
+            "    assert unchanged() == 1\n"
+        ),
+        encoding="utf-8",
+    )
+    old_snapshots, _ = take_snapshot(
+        str(tmp_path),
+        excludes=[],
+    )
+
+    source_path.write_text(
+        (
+            "def changed():\n"
+            "    return False\n"
+            "\n"
+            "def unchanged():\n"
+            "    return 1\n"
+        ),
+        encoding="utf-8",
+    )
+    new_snapshots, _ = take_snapshot(
+        str(tmp_path),
+        excludes=[],
+    )
+    changed_files = compare_snapshots(
+        old_snapshots,
+        new_snapshots,
+    )
+
+    selection = select_tests_for_changes(
+        project_root=str(tmp_path),
+        language="python",
+        changed_files=changed_files,
+        old_snapshots=old_snapshots,
+        new_snapshots=new_snapshots,
+    )
+
+    assert selection.precision is (
+        ImpactAnalysisPrecision.SYMBOL
+    )
+    assert selection.test_files == [
+        "tests/test_service.py",
+    ]
+    assert any(
+        "service.changed -> " in evidence
+        for evidence in selection.evidence
+    )
+    assert not any(
+        "service.unchanged -> " in evidence
+        for evidence in selection.evidence
+    )
+
+
+def test_symbol_snapshot_maps_deleted_method(tmp_path):
+    source_path = tmp_path / "service.py"
+    source_path.write_text(
+        (
+            "class Service:\n"
+            "    def removed(self):\n"
+            "        return 1\n"
+            "\n"
+            "    def retained(self):\n"
+            "        return 2\n"
+        ),
+        encoding="utf-8",
+    )
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+    (tests_path / "test_service.py").write_text(
+        (
+            "from service import Service\n"
+            "\n"
+            "def test_removed():\n"
+            "    service = Service()\n"
+            "    assert service.removed() == 1\n"
+        ),
+        encoding="utf-8",
+    )
+    old_snapshots, _ = take_snapshot(
+        str(tmp_path),
+        excludes=[],
+    )
+
+    source_path.write_text(
+        (
+            "class Service:\n"
+            "    def retained(self):\n"
+            "        return 2\n"
+        ),
+        encoding="utf-8",
+    )
+    new_snapshots, _ = take_snapshot(
+        str(tmp_path),
+        excludes=[],
+    )
+
+    selection = select_tests_for_changes(
+        project_root=str(tmp_path),
+        language="python",
+        changed_files=compare_snapshots(
+            old_snapshots,
+            new_snapshots,
+        ),
+        old_snapshots=old_snapshots,
+        new_snapshots=new_snapshots,
+    )
+
+    assert selection.precision is (
+        ImpactAnalysisPrecision.SYMBOL
+    )
+    assert selection.test_files == [
+        "tests/test_service.py",
+    ]
+    assert any(
+        "service.Service.removed -> " in evidence
+        for evidence in selection.evidence
+    )
+
+
+def test_legacy_snapshot_uses_file_level_fallback(tmp_path):
+    source_path = tmp_path / "service.py"
+    source_path.write_text(
+        (
+            "def changed():\n"
+            "    return True\n"
+            "\n"
+            "def unchanged():\n"
+            "    return 1\n"
+        ),
+        encoding="utf-8",
+    )
+    old_snapshots, _ = take_snapshot(
+        str(tmp_path),
+        excludes=[],
+    )
+    old_snapshots = [
+        Snapshot(
+            path=snapshot.path,
+            hash=snapshot.hash,
+            size=snapshot.size,
+            mtime=snapshot.mtime,
+            type=snapshot.type,
+            symbols=None,
+        )
+        for snapshot in old_snapshots
+    ]
+
+    source_path.write_text(
+        (
+            "def changed():\n"
+            "    return False\n"
+            "\n"
+            "def unchanged():\n"
+            "    return 1\n"
+        ),
+        encoding="utf-8",
+    )
+    new_snapshots, _ = take_snapshot(
+        str(tmp_path),
+        excludes=[],
+    )
+
+    selection = select_tests_for_changes(
+        project_root=str(tmp_path),
+        language="python",
+        changed_files=compare_snapshots(
+            old_snapshots,
+            new_snapshots,
+        ),
+        old_snapshots=old_snapshots,
+        new_snapshots=new_snapshots,
+    )
+
+    assert selection.precision is (
+        ImpactAnalysisPrecision.FILE_LEVEL
+    )
+    assert selection.warnings == [
+        (
+            "No existing tests directly map to the changed "
+            "symbols; create a TestSpec before generating tests"
+        ),
+        (
+            "Python symbol baseline unavailable for: service.py; "
+            "using file-level conservative analysis"
+        ),
+    ]
+    assert "service.changed" in selection.evidence[0]
+    assert "service.unchanged" in selection.evidence[0]

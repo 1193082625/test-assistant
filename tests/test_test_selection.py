@@ -53,6 +53,7 @@ def test_selection_serializes_to_stable_machine_values():
         "warnings": [
             "Falling back to all pytest files",
         ],
+        "precision": "file_level",
     }
 
     assert type(serialized["mode"]) is str

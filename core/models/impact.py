@@ -1,8 +1,24 @@
 """测试影响选择领域模型"""
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from .enums import TestSelectionMode
+from .source import SourceSymbol
+
+
+class ImpactAnalysisPrecision(StrEnum):
+    SYMBOL = "symbol"
+    FILE_LEVEL = "file_level"
+
+
+@dataclass(frozen=True)
+class PythonSymbolAnalysis:
+    symbols: list[SourceSymbol] = field(default_factory=list)
+    precision: ImpactAnalysisPrecision = (
+        ImpactAnalysisPrecision.FILE_LEVEL
+    )
+    fallback_files: list[str] = field(default_factory=list)
 
 @dataclass(frozen=True)
 class TestSelection:
@@ -11,6 +27,9 @@ class TestSelection:
     test_files: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    precision: ImpactAnalysisPrecision = (
+        ImpactAnalysisPrecision.FILE_LEVEL
+    )
 
     def to_dict(self) -> dict[str, object]:
         """转换为 确定、可序列化 的字典"""
@@ -19,4 +38,5 @@ class TestSelection:
             "test_files": sorted(set(self.test_files)),
             "evidence": list(self.evidence),
             "warnings": list(self.warnings),
+            "precision": self.precision.value,
         }

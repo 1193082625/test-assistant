@@ -30,6 +30,7 @@ class GraphStates(TypedDict):
     changed_files: dict # detect的输出 -> run 的输入
     execution_reports_by_file: dict[str, ExecutionReport]
     pending_snapshots: list[Snapshot]
+    baseline_snapshots: list[Snapshot]
     test_selection: TestSelection
 
 # LangGraph 节点只接收一个参数 -- state，多出来的参数没法传进去
@@ -62,6 +63,7 @@ def detect_change_node(state: GraphStates) -> dict:
         "changed_files": changes,
         # 同于确保检测到文件变化后，后面任何中间步骤失败，磁盘上的旧基线都保持不变，下一次运行仍能检测到这些变化。这与数据库事务“全部成功才提交”的思想相似。
         "pending_snapshots": new_snapshots,
+        "baseline_snapshots": old_manifest.files,
         "messages": "增量检查修改内容"
     }
 
@@ -75,6 +77,8 @@ def analyze_impact_node(state: GraphStates) -> dict:
         project_root=project_info.project_path,
         language=project_config.get("language", "unknown"),
         changed_files=state["changed_files"],
+        old_snapshots=state.get("baseline_snapshots"),
+        new_snapshots=state.get("pending_snapshots"),
     )
 
     return {

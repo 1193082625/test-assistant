@@ -6,6 +6,7 @@ import tempfile
 from dataclasses import dataclass, field
 import hashlib
 import os
+import ast
 from pathlib import Path
 
 # 默认文件上限 5MB
@@ -51,12 +52,32 @@ BINARY_EXTENSIONS = {
 SNAPSHOT_FORMAT_VERSION = 2
 
 @dataclass
+class PythonSymbolSnapshot:
+    """Python 符号的稳定摘要。"""
+
+    qualified_name: str
+    kind: str
+    hash: str
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True)
+class PythonSymbolChanges:
+    added: tuple[str, ...] = ()
+    modified: tuple[str, ...] = ()
+    deleted: tuple[str, ...] = ()
+    fallback_files: tuple[str, ...] = ()
+
+
+@dataclass
 class Snapshot:
     path: str
     hash: str
     size: int
     mtime: float # 最后修改时间
     type: str
+    symbols: list[PythonSymbolSnapshot] | None = None
 
 @dataclass
 class SnapshotManifest:
@@ -83,6 +104,22 @@ class SnapshotManifest:
                     "size": snapshot.size,
                     "mtime": snapshot.mtime,
                     "type": snapshot.type,
+                    **(
+                        {
+                            "symbols": [
+                                {
+                                    "qualified_name": symbol.qualified_name,
+                                    "kind": symbol.kind,
+                                    "hash": symbol.hash,
+                                    "start_line": symbol.start_line,
+                                    "end_line": symbol.end_line,
+                                }
+                                for symbol in snapshot.symbols
+                            ]
+                        }
+                        if snapshot.symbols is not None
+                        else {}
+                    ),
                 }
                 for snapshot in self.files
             ]
@@ -117,6 +154,22 @@ class SnapshotManifest:
                 size=item["size"],
                 mtime=item["mtime"],
                 type=item["type"],
+                symbols=(
+                    [
+                        PythonSymbolSnapshot(
+                            qualified_name=(
+                                symbol["qualified_name"]
+                            ),
+                            kind=symbol["kind"],
+                            hash=symbol["hash"],
+                            start_line=symbol["start_line"],
+                            end_line=symbol["end_line"],
+                        )
+                        for symbol in item["symbols"]
+                    ]
+                    if "symbols" in item
+                    else None
+                ),
             )
             for item in data.get("files", [])
         ]
@@ -155,12 +208,156 @@ def get_file_snapshot(file_path: str, root_dir: str) -> Snapshot:
     relative_path = file_path_obj.relative_to(root_path_obj).as_posix()
 
     sha256, size, mtime = get_file_info(str(file_path_obj))
+    symbols = None
+    if file_path_obj.suffix == ".py":
+        try:
+            module_name = _resolve_snapshot_module_name(
+                relative_path
+            )
+            symbols = _snapshot_python_symbols(
+                file_path_obj,
+                module_name,
+            )
+        except (SyntaxError, UnicodeError, OSError):
+            # 文件级 hash 仍然有效；符号分析由影响层安全降级。
+            symbols = None
+
     return Snapshot(
         path=relative_path,
         hash=sha256,
         size=size,
         mtime=mtime,
         type=file_path_obj.suffix, # 扩展名
+        symbols=symbols,
+    )
+
+
+def _resolve_snapshot_module_name(relative_path: str) -> str:
+    parts = list(Path(relative_path).parts)
+    if parts and parts[0] == "src":
+        parts = parts[1:]
+    module_file = Path(parts[-1])
+    if module_file.name == "__init__.py":
+        parts = parts[:-1]
+    else:
+        parts[-1] = module_file.stem
+    return ".".join(parts)
+
+
+def _hash_ast_node(node: ast.AST) -> str:
+    normalized = ast.dump(
+        node,
+        annotate_fields=True,
+        include_attributes=False,
+    )
+    return hashlib.sha256(
+        normalized.encode("utf-8")
+    ).hexdigest()
+
+
+def _class_header_node(node: ast.ClassDef) -> ast.ClassDef:
+    """类摘要不包含方法体，避免方法修改污染类 hash。"""
+    return ast.ClassDef(
+        name=node.name,
+        bases=node.bases,
+        keywords=node.keywords,
+        body=[],
+        decorator_list=node.decorator_list,
+        type_params=getattr(node, "type_params", []),
+    )
+
+
+class _PythonSymbolSnapshotVisitor(ast.NodeVisitor):
+    def __init__(self, module_name: str) -> None:
+        self.module_name = module_name
+        self.qualified_stack: list[str] = []
+        self.kind_stack: list[str] = []
+        self.symbols: list[PythonSymbolSnapshot] = []
+
+    def _qualified_name(self, name: str) -> str:
+        parent = (
+            self.qualified_stack[-1]
+            if self.qualified_stack
+            else self.module_name
+        )
+        return f"{parent}.{name}"
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        qualified_name = self._qualified_name(node.name)
+        self.symbols.append(
+            PythonSymbolSnapshot(
+                qualified_name=qualified_name,
+                kind="class",
+                hash=_hash_ast_node(_class_header_node(node)),
+                start_line=min(
+                    [node.lineno]
+                    + [
+                        decorator.lineno
+                        for decorator in node.decorator_list
+                    ]
+                ),
+                end_line=node.end_lineno or node.lineno,
+            )
+        )
+        self.qualified_stack.append(qualified_name)
+        self.kind_stack.append("class")
+        self.generic_visit(node)
+        self.kind_stack.pop()
+        self.qualified_stack.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(
+        self,
+        node: ast.AsyncFunctionDef,
+    ) -> None:
+        self._visit_function(node)
+
+    def _visit_function(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        qualified_name = self._qualified_name(node.name)
+        kind = (
+            "method"
+            if self.kind_stack
+            and self.kind_stack[-1] == "class"
+            else "function"
+        )
+        self.symbols.append(
+            PythonSymbolSnapshot(
+                qualified_name=qualified_name,
+                kind=kind,
+                hash=_hash_ast_node(node),
+                start_line=min(
+                    [node.lineno]
+                    + [
+                        decorator.lineno
+                        for decorator in node.decorator_list
+                    ]
+                ),
+                end_line=node.end_lineno or node.lineno,
+            )
+        )
+        self.qualified_stack.append(qualified_name)
+        self.kind_stack.append(kind)
+        self.generic_visit(node)
+        self.kind_stack.pop()
+        self.qualified_stack.pop()
+
+
+def _snapshot_python_symbols(
+    file_path: Path,
+    module_name: str,
+) -> list[PythonSymbolSnapshot]:
+    source = file_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    visitor = _PythonSymbolSnapshotVisitor(module_name)
+    visitor.visit(tree)
+    return sorted(
+        visitor.symbols,
+        key=lambda symbol: symbol.qualified_name,
     )
 
 def read_snapshot_manifest(snapshot_path: str) -> SnapshotManifest:
@@ -201,6 +398,89 @@ def compare_snapshots(
         "deleted": deleted,
         "modified": modified,
     }
+
+
+def compare_python_symbol_snapshots(
+    old_snapshots: list[Snapshot],
+    new_snapshots: list[Snapshot],
+    changed_files: dict[str, list[str]],
+) -> PythonSymbolChanges:
+    """比较 Python 文件中的符号摘要。"""
+    old_map = {
+        snapshot.path: snapshot
+        for snapshot in old_snapshots
+    }
+    new_map = {
+        snapshot.path: snapshot
+        for snapshot in new_snapshots
+    }
+    added: set[str] = set()
+    modified: set[str] = set()
+    deleted: set[str] = set()
+    fallback_files: set[str] = set()
+
+    for path in sorted(changed_files.get("added", [])):
+        if not path.endswith(".py"):
+            continue
+        snapshot = new_map.get(path)
+        if snapshot is None or snapshot.symbols is None:
+            fallback_files.add(path)
+            continue
+        added.update(
+            symbol.qualified_name
+            for symbol in snapshot.symbols
+        )
+
+    for path in sorted(changed_files.get("modified", [])):
+        if not path.endswith(".py"):
+            continue
+        old_snapshot = old_map.get(path)
+        new_snapshot = new_map.get(path)
+        if (
+            old_snapshot is None
+            or new_snapshot is None
+            or old_snapshot.symbols is None
+            or new_snapshot.symbols is None
+        ):
+            fallback_files.add(path)
+            continue
+
+        old_symbols = {
+            symbol.qualified_name: symbol.hash
+            for symbol in old_snapshot.symbols
+        }
+        new_symbols = {
+            symbol.qualified_name: symbol.hash
+            for symbol in new_snapshot.symbols
+        }
+        old_names = set(old_symbols)
+        new_names = set(new_symbols)
+        added.update(new_names - old_names)
+        deleted.update(old_names - new_names)
+        modified.update(
+            name
+            for name in old_names & new_names
+            if old_symbols[name] != new_symbols[name]
+        )
+
+    for path in sorted(changed_files.get("deleted", [])):
+        if not path.endswith(".py"):
+            continue
+        snapshot = old_map.get(path)
+        if snapshot is None or snapshot.symbols is None:
+            fallback_files.add(path)
+            continue
+        deleted.update(
+            symbol.qualified_name
+            for symbol in snapshot.symbols
+        )
+
+    return PythonSymbolChanges(
+        added=tuple(sorted(added)),
+        modified=tuple(sorted(modified)),
+        deleted=tuple(sorted(deleted)),
+        fallback_files=tuple(sorted(fallback_files)),
+    )
 
 def commit_snapshot_manifest(snapshot_path: str, snapshots: list[Snapshot]) -> str:
     """原子写入快照基线"""
@@ -274,4 +554,3 @@ def take_snapshot(root_dir: str, excludes: list[str], max_file_size: int = DEFAU
     # 目录内排序只能保证每个目录中的文件有序，但不能完全等同于“所有相对路径全局排序”
     snapshots.sort(key=lambda snapshot: snapshot.path)
     return snapshots, skipped
-

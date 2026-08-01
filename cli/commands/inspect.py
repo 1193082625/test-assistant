@@ -18,8 +18,8 @@ import yaml
 
 from core.analyzers.framework import EXCLUDE_DIRS
 from core.analyzers.impact import (
+    analyze_changed_python_symbols,
     select_tests_for_changes,
-    find_changed_python_symbols
 )
 from core.analyzers.snapshot import (
     compare_snapshots,
@@ -113,11 +113,11 @@ def inspect_command(project_path: Path) -> None:
 
     try:
         if snapshot_path.is_file():
-            old_snapshot = read_snapshot_manifest(
+            old_snapshots = read_snapshot_manifest(
                 str(snapshot_path)
             ).files
         else:
-            old_snapshot = []
+            old_snapshots = []
     except (OSError, ValueError) as error:
         raise click.ClickException(
             f"无法读取项目快照: {error}"
@@ -128,15 +128,22 @@ def inspect_command(project_path: Path) -> None:
         EXCLUDE_DIRS,
     )
 
-    changed_files = compare_snapshots(old_snapshot, new_snapshots)
+    changed_files = compare_snapshots(
+        old_snapshots,
+        new_snapshots,
+    )
     changed_symbols = []
+    symbol_analysis = None
 
     if str(language).strip().lower() == "python":
         try:
-            changed_symbols = find_changed_python_symbols(
+            symbol_analysis = analyze_changed_python_symbols(
                 project_root=str(root_path),
                 changed_files=changed_files,
+                old_snapshots=old_snapshots,
+                new_snapshots=new_snapshots,
             )
+            changed_symbols = symbol_analysis.symbols
         except (SyntaxError, UnicodeError, OSError):
             # TestSelection 会负责输出安全降级警告
             changed_symbols = []
@@ -173,7 +180,14 @@ def inspect_command(project_path: Path) -> None:
         project_root=str(root_path),
         language=language,
         changed_files=changed_files,
+        old_snapshots=old_snapshots,
+        new_snapshots=new_snapshots,
     )
+
+    if symbol_analysis is not None:
+        click.echo(
+            f"分析精度: {symbol_analysis.precision.value}"
+        )
 
     if changed_symbols:
         click.echo("变更符号: ")

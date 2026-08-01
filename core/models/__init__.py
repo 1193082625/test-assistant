@@ -26,7 +26,11 @@ from .source import (
     ContractEvidence
 )
 
-from .impact import TestSelection
+from .impact import (
+    ImpactAnalysisPrecision,
+    PythonSymbolAnalysis,
+    TestSelection,
+)
 
 from .test_spec import ExpectationEvidence, TestSpec, build_test_spec_id
 from .planner import PlannerResult
@@ -60,6 +64,8 @@ __all__ = [
     "ContractEvidence",
     "TestSelectionMode",
     "TestSelection",
+    "ImpactAnalysisPrecision",
+    "PythonSymbolAnalysis",
     "TestSpecStatus",
     "ExpectationEvidence",
     "TestSpec",

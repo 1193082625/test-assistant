@@ -113,6 +113,7 @@ def test_inspect_explains_test_selection(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert "测试选择: direct" in result.output
+    assert "分析精度: symbol" in result.output
     assert "tests/test_demo.py" in result.output
     assert "demo.add ->" in result.output
     assert "变更符号:" in result.output

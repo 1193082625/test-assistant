@@ -4,9 +4,16 @@ impact 影响
 """
 from pathlib import Path
 from core.models import (
+    ImpactAnalysisPrecision,
+    PythonSymbolAnalysis,
     SourceSymbol,
+    SymbolKind,
     TestIndex,
     TestIndexEntry, TestSelection, TestSelectionMode
+)
+from core.analyzers.snapshot import (
+    Snapshot,
+    compare_python_symbol_snapshots,
 )
 from core.analyzers.source import (
     analyze_python_symbols,
@@ -110,42 +117,131 @@ def _is_formal_python_test_file(
     )
 
 def find_changed_python_symbols(
-        project_root: str,
-        changed_files: dict[str, list[str]],
+    project_root: str,
+    changed_files: dict[str, list[str]],
+    old_snapshots: list[Snapshot] | None = None,
+    new_snapshots: list[Snapshot] | None = None,
 ) -> list[SourceSymbol]:
     """提取新增和修改的 python 文件中的源码符号"""
+    return analyze_changed_python_symbols(
+        project_root=project_root,
+        changed_files=changed_files,
+        old_snapshots=old_snapshots,
+        new_snapshots=new_snapshots,
+    ).symbols
+
+
+def analyze_changed_python_symbols(
+    project_root: str,
+    changed_files: dict[str, list[str]],
+    old_snapshots: list[Snapshot] | None = None,
+    new_snapshots: list[Snapshot] | None = None,
+) -> PythonSymbolAnalysis:
+    """返回精确符号变化；无摘要时保守分析整个文件。"""
     root_path = Path(project_root)
     symbols_by_name: dict[str, SourceSymbol] = {}
+    source_files = sorted({
+        relative_path
+        for change_type in ("added", "modified")
+        for relative_path in changed_files.get(change_type, [])
+        if (
+            relative_path.endswith(".py")
+            and not _is_formal_python_test_file(
+                relative_path
+            )
+        )
+    })
 
-    for change_type in ("added", "modified"):
-        for relative_path in sorted(
-            changed_files.get(change_type, []),
+    for relative_path in source_files:
+        source_path = root_path / relative_path
+        module_name = resolve_python_module_name(
+            file_path=str(source_path),
+            project_root=str(root_path),
+        )
+        for symbol in analyze_python_symbols(
+            file_path=str(source_path),
+            module_name=module_name,
         ):
-            if not relative_path.endswith(".py"):
-                continue
+            symbols_by_name[symbol.qualified_name] = symbol
 
-            if _is_formal_python_test_file(
-                    relative_path
-            ):
-                continue
+    if old_snapshots is None or new_snapshots is None:
+        return PythonSymbolAnalysis(
+            symbols=[
+                symbols_by_name[name]
+                for name in sorted(symbols_by_name)
+            ],
+            precision=ImpactAnalysisPrecision.FILE_LEVEL,
+            fallback_files=[],
+        )
 
-            source_path = root_path / relative_path
-            module_name = resolve_python_module_name(
-                file_path=str(source_path),
-                project_root=str(root_path),
-            )
-            symbols = analyze_python_symbols(
-                file_path=str(source_path),
-                module_name=module_name,
-            )
+    symbol_changes = compare_python_symbol_snapshots(
+        old_snapshots,
+        new_snapshots,
+        changed_files,
+    )
+    exact_current_names = {
+        *symbol_changes.added,
+        *symbol_changes.modified,
+    }
+    fallback_files = {
+        path
+        for path in symbol_changes.fallback_files
+        if path in source_files
+    }
 
-            for symbol in symbols:
-                symbols_by_name[symbol.qualified_name] = symbol
+    selected_symbols: dict[str, SourceSymbol] = {}
+    for symbol in symbols_by_name.values():
+        relative_path = (
+            Path(symbol.file_path)
+            .resolve()
+            .relative_to(root_path.resolve())
+            .as_posix()
+        )
+        if (
+            symbol.qualified_name in exact_current_names
+            or relative_path in fallback_files
+        ):
+            selected_symbols[symbol.qualified_name] = symbol
 
-    return [
-        symbols_by_name[qualified_name]
-        for qualified_name in sorted(symbols_by_name)
-    ]
+    old_symbol_locations = {
+        symbol.qualified_name: (snapshot.path, symbol)
+        for snapshot in old_snapshots
+        for symbol in (snapshot.symbols or [])
+    }
+    for qualified_name in symbol_changes.deleted:
+        location = old_symbol_locations.get(qualified_name)
+        if location is None:
+            continue
+        relative_path, summary = location
+        parent_name = qualified_name.rsplit(".", 1)[0]
+        selected_symbols[qualified_name] = SourceSymbol(
+            name=qualified_name.rsplit(".", 1)[-1],
+            qualified_name=qualified_name,
+            kind=SymbolKind(summary.kind),
+            file_path=str(root_path / relative_path),
+            signature="",
+            start_line=summary.start_line,
+            end_line=summary.end_line,
+            owner_class=(
+                parent_name.rsplit(".", 1)[-1]
+                if summary.kind == "method"
+                else None
+            ),
+            parent_qualified_name=parent_name,
+        )
+
+    return PythonSymbolAnalysis(
+        symbols=[
+            selected_symbols[name]
+            for name in sorted(selected_symbols)
+        ],
+        precision=(
+            ImpactAnalysisPrecision.FILE_LEVEL
+            if fallback_files
+            else ImpactAnalysisPrecision.SYMBOL
+        ),
+        fallback_files=sorted(fallback_files),
+    )
 
 def find_changed_python_symbol_names(
         project_root: str,
@@ -215,6 +311,8 @@ def select_tests_for_changes(
     project_root: str,
     language: str | None,
     changed_files: dict[str, list[str]],
+    old_snapshots: list[Snapshot] | None = None,
+    new_snapshots: list[Snapshot] | None = None,
 ) -> TestSelection:
     """为项目变更生成可解释的测试选择结果。"""
     if (
@@ -319,10 +417,13 @@ def select_tests_for_changes(
     )
 
     try:
-        changed_symbols = find_changed_python_symbols(
+        symbol_analysis = analyze_changed_python_symbols(
             project_root=project_root,
             changed_files=changed_files,
+            old_snapshots=old_snapshots,
+            new_snapshots=new_snapshots,
         )
+        changed_symbols = symbol_analysis.symbols
     except (SyntaxError, UnicodeError, OSError) as error:
         return _build_analysis_failure_selection(
             project_root=project_root,
@@ -340,7 +441,10 @@ def select_tests_for_changes(
                     "source symbols were found"
                 ),
             ],
-            warnings=[],
+            warnings=_symbol_precision_warnings(
+                symbol_analysis
+            ),
+            precision=symbol_analysis.precision,
         )
 
     try:
@@ -397,7 +501,11 @@ def select_tests_for_changes(
                     "the changed symbols; create a "
                     "TestSpec before generating tests"
                 ),
+                *_symbol_precision_warnings(
+                    symbol_analysis
+                ),
             ],
+            precision=symbol_analysis.precision,
         )
 
     test_files = sorted({
@@ -431,5 +539,22 @@ def select_tests_for_changes(
         mode=TestSelectionMode.DIRECT,
         test_files=test_files,
         evidence=evidence,
-        warnings=[],
+        warnings=_symbol_precision_warnings(
+            symbol_analysis
+        ),
+        precision=symbol_analysis.precision,
     )
+
+
+def _symbol_precision_warnings(
+    analysis: PythonSymbolAnalysis,
+) -> list[str]:
+    if not analysis.fallback_files:
+        return []
+    return [
+        (
+            "Python symbol baseline unavailable for: "
+            f"{', '.join(analysis.fallback_files)}; "
+            "using file-level conservative analysis"
+        )
+    ]

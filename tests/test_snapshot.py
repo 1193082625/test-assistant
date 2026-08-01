@@ -11,9 +11,11 @@ from core.analyzers.snapshot import (
     take_snapshot,
     Snapshot,
     SnapshotManifest,
+    PythonSymbolSnapshot,
     SNAPSHOT_FORMAT_VERSION,
     read_snapshot_manifest,
     compare_snapshots,
+    compare_python_symbol_snapshots,
     commit_snapshot_manifest,
 )
 
@@ -130,7 +132,16 @@ def test_snapshot_manifest_round_trip():
                 hash="abc123",
                 size=10,
                 mtime=123.0,
-                type=".py"
+                type=".py",
+                symbols=[
+                    PythonSymbolSnapshot(
+                        qualified_name="src.app.run",
+                        kind="function",
+                        hash="symbol-hash",
+                        start_line=1,
+                        end_line=2,
+                    )
+                ],
             )
         ]
     )
@@ -141,6 +152,142 @@ def test_snapshot_manifest_round_trip():
     assert data["version"] == SNAPSHOT_FORMAT_VERSION
     assert data["files"][0]["path"] == "src/app.py"
     assert restored == original
+
+
+def test_snapshot_manifest_accepts_v2_file_without_symbols():
+    manifest = SnapshotManifest.from_dict({
+        "version": SNAPSHOT_FORMAT_VERSION,
+        "files": [
+            {
+                "path": "app.py",
+                "hash": "abc123",
+                "size": 10,
+                "mtime": 123.0,
+                "type": ".py",
+            }
+        ],
+    })
+
+    assert manifest.files[0].symbols is None
+
+
+def test_python_snapshot_hashes_only_modified_method(tmp_path):
+    source_path = tmp_path / "service.py"
+    source_path.write_text(
+        (
+            "class Service:\n"
+            "    def changed(self):\n"
+            "        return True\n"
+            "\n"
+            "    def unchanged(self):\n"
+            "        return 1\n"
+        ),
+        encoding="utf-8",
+    )
+    old_snapshot = get_file_snapshot(
+        str(source_path),
+        str(tmp_path),
+    )
+
+    source_path.write_text(
+        (
+            "class Service:\n"
+            "    def changed(self):\n"
+            "        return False\n"
+            "\n"
+            "    def unchanged(self):\n"
+            "        return 1\n"
+        ),
+        encoding="utf-8",
+    )
+    new_snapshot = get_file_snapshot(
+        str(source_path),
+        str(tmp_path),
+    )
+
+    old_hashes = {
+        symbol.qualified_name: symbol.hash
+        for symbol in old_snapshot.symbols or []
+    }
+    new_hashes = {
+        symbol.qualified_name: symbol.hash
+        for symbol in new_snapshot.symbols or []
+    }
+
+    assert old_hashes["service.Service"] == (
+        new_hashes["service.Service"]
+    )
+    assert old_hashes["service.Service.changed"] != (
+        new_hashes["service.Service.changed"]
+    )
+    assert old_hashes["service.Service.unchanged"] == (
+        new_hashes["service.Service.unchanged"]
+    )
+
+    changes = compare_python_symbol_snapshots(
+        [old_snapshot],
+        [new_snapshot],
+        {
+            "added": [],
+            "modified": ["service.py"],
+            "deleted": [],
+        },
+    )
+
+    assert changes.added == ()
+    assert changes.modified == (
+        "service.Service.changed",
+    )
+    assert changes.deleted == ()
+    assert changes.fallback_files == ()
+
+
+def test_python_snapshot_detects_signature_and_decorator_change(
+    tmp_path,
+):
+    source_path = tmp_path / "service.py"
+    source_path.write_text(
+        (
+            "def marker(function):\n"
+            "    return function\n"
+            "\n"
+            "def run(value):\n"
+            "    return value\n"
+        ),
+        encoding="utf-8",
+    )
+    old_snapshot = get_file_snapshot(
+        str(source_path),
+        str(tmp_path),
+    )
+
+    source_path.write_text(
+        (
+            "def marker(function):\n"
+            "    return function\n"
+            "\n"
+            "@marker\n"
+            "def run(value, default=None):\n"
+            "    return value or default\n"
+        ),
+        encoding="utf-8",
+    )
+    new_snapshot = get_file_snapshot(
+        str(source_path),
+        str(tmp_path),
+    )
+
+    changes = compare_python_symbol_snapshots(
+        [old_snapshot],
+        [new_snapshot],
+        {
+            "added": [],
+            "modified": ["service.py"],
+            "deleted": [],
+        },
+    )
+
+    assert changes.modified == ("service.run",)
 
 def test_snapshot_manifest_rejects_unsupported_version():
     """版本拒绝测试"""
