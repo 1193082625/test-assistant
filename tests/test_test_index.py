@@ -328,3 +328,135 @@ def test_filter_symbols_excludes_already_tested_symbol():
     assert [
         symbol.qualified_name for symbol in remaining_symbols
     ] == ["demo.subtract"]
+
+
+def _service_rule_symbol(
+    qualified_name: str = "app.service.Service.rule",
+) -> SourceSymbol:
+    owner_name = qualified_name.rsplit(".", 2)[-2]
+    return SourceSymbol(
+        name="rule",
+        qualified_name=qualified_name,
+        kind=SymbolKind.METHOD,
+        file_path="app/service.py",
+        signature="rule(self, values: dict) -> bool",
+        start_line=2,
+        end_line=3,
+        owner_class=owner_name,
+        parent_qualified_name=qualified_name.rsplit(".", 1)[0],
+    )
+
+
+def test_index_maps_self_attribute_created_in_setup_method(
+    tmp_path,
+):
+    test_path = tmp_path / "test_service.py"
+    test_path.write_text(
+        (
+            "from app.service import Service\n"
+            "\n"
+            "class TestService:\n"
+            "    def setup_method(self):\n"
+            "        self.service = Service()\n"
+            "\n"
+            "    def test_rule(self):\n"
+            "        assert self.service.rule({}) is False\n"
+        ),
+        encoding="utf-8",
+    )
+
+    entries = index_python_test_file(
+        file_path=str(test_path),
+        module_name="tests.test_service",
+        project_root=str(tmp_path),
+        source_symbols=[_service_rule_symbol()],
+    )
+
+    assert entries == [
+        IndexEntry(
+            source_qualified_name=(
+                "app.service.Service.rule"
+            ),
+            test_qualified_name=(
+                "tests.test_service."
+                "TestService.test_rule"
+            ),
+            test_file_path="test_service.py",
+            test_line=7,
+        )
+    ]
+
+
+def test_index_maps_local_instance_created_in_test(tmp_path):
+    test_path = tmp_path / "test_service.py"
+    test_path.write_text(
+        (
+            "from app.service import Service\n"
+            "\n"
+            "def test_rule():\n"
+            "    service = Service()\n"
+            "    assert service.rule({}) is False\n"
+        ),
+        encoding="utf-8",
+    )
+
+    entries = index_python_test_file(
+        file_path=str(test_path),
+        module_name="tests.test_service",
+        project_root=str(tmp_path),
+        source_symbols=[_service_rule_symbol()],
+    )
+
+    assert [entry.source_qualified_name for entry in entries] == [
+        "app.service.Service.rule",
+    ]
+
+
+def test_index_maps_instance_created_from_import_alias(tmp_path):
+    test_path = tmp_path / "test_service.py"
+    test_path.write_text(
+        (
+            "from app.service import Service as Subject\n"
+            "\n"
+            "def test_rule():\n"
+            "    service = Subject()\n"
+            "    assert service.rule({}) is False\n"
+        ),
+        encoding="utf-8",
+    )
+
+    entries = index_python_test_file(
+        file_path=str(test_path),
+        module_name="tests.test_service",
+        project_root=str(tmp_path),
+        source_symbols=[_service_rule_symbol()],
+    )
+
+    assert [entry.source_qualified_name for entry in entries] == [
+        "app.service.Service.rule",
+    ]
+
+
+def test_index_does_not_guess_method_owner_from_name(tmp_path):
+    test_path = tmp_path / "test_service.py"
+    test_path.write_text(
+        (
+            "def test_rule(unknown_service):\n"
+            "    assert unknown_service.rule({}) is False\n"
+        ),
+        encoding="utf-8",
+    )
+
+    entries = index_python_test_file(
+        file_path=str(test_path),
+        module_name="tests.test_service",
+        project_root=str(tmp_path),
+        source_symbols=[
+            _service_rule_symbol(),
+            _service_rule_symbol(
+                "app.other.OtherService.rule"
+            ),
+        ],
+    )
+
+    assert entries == []

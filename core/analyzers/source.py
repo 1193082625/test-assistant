@@ -228,6 +228,11 @@ def index_python_test_file(
         symbol.qualified_name
         for symbol in source_symbols
     }
+    callable_source_names = {
+        symbol.qualified_name
+        for symbol in source_symbols
+        if symbol.kind is not SymbolKind.CLASS
+    }
 
     imported_targets: dict[str, str] = {}
     imported_modules: dict[str, str] = {}
@@ -261,10 +266,22 @@ def index_python_test_file(
                     f"{node.module}.{imported.name}"
                 )
 
-                if target_name in source_names:
+                if _matches_source_or_owner(
+                    target_name,
+                    source_names,
+                ):
                     imported_targets[local_name] = (
                         target_name
                     )
+
+    setup_instance_bindings = (
+        _collect_test_class_setup_bindings(
+            tree=tree,
+            imported_targets=imported_targets,
+            imported_modules=imported_modules,
+            source_names=source_names,
+        )
+    )
 
     # 按限定名保存pytest测试函数的AST节点
     # 既包含顶层测试函数，也包含 Test 类中的测试方法
@@ -294,26 +311,50 @@ def index_python_test_file(
         if test_node is None:
             continue
 
+        instance_bindings = dict(
+            setup_instance_bindings.get(
+                test_symbol.owner_class or "",
+                {},
+            )
+        )
+        instance_bindings.update(
+            _collect_instance_bindings(
+                node=test_node,
+                imported_targets=imported_targets,
+                imported_modules=imported_modules,
+                source_names=source_names,
+            )
+        )
+
         call_names = _collect_function_calls(test_node)
 
         for call_name in call_names:
-            # 从本地名称找到真实源码符号
-            target_name = imported_targets.get(call_name)
+            target_name = _resolve_imported_call_target(
+                call_name=call_name,
+                imported_targets=imported_targets,
+                imported_modules=imported_modules,
+                source_names=callable_source_names,
+            )
 
             if target_name is None:
                 call_parts = call_name.split(".")
-                imported_module = imported_modules.get(call_parts[0])
-
-                if imported_module is not None:
-                    candidate_name = ".".join(
-                        [
-                            imported_module,
-                            *call_parts[1:],
-                        ]
+                if len(call_parts) >= 2:
+                    receiver_name = ".".join(
+                        call_parts[:-1]
                     )
-
-                    if candidate_name in source_names:
-                        target_name = candidate_name
+                    owner_name = instance_bindings.get(
+                        receiver_name
+                    )
+                    if owner_name is not None:
+                        candidate_name = (
+                            f"{owner_name}."
+                            f"{call_parts[-1]}"
+                        )
+                        if (
+                            candidate_name
+                            in callable_source_names
+                        ):
+                            target_name = candidate_name
 
             if target_name is None:
                 continue
@@ -333,6 +374,201 @@ def index_python_test_file(
         entry.test_file_path,
         entry.test_line,
     ))
+
+
+def _matches_source_or_owner(
+    qualified_name: str,
+    source_names: set[str],
+) -> bool:
+    """判断名称是源码符号或源码方法的所属对象。"""
+    return (
+        qualified_name in source_names
+        or any(
+            source_name.startswith(
+                f"{qualified_name}."
+            )
+            for source_name in source_names
+        )
+    )
+
+
+def _resolve_imported_call_target(
+    *,
+    call_name: str,
+    imported_targets: dict[str, str],
+    imported_modules: dict[str, str],
+    source_names: set[str],
+) -> str | None:
+    """把导入后的本地调用名解析为源码限定名。"""
+    call_parts = call_name.split(".")
+
+    imported_target = imported_targets.get(
+        call_parts[0]
+    )
+    if imported_target is not None:
+        candidate_name = ".".join(
+            [imported_target, *call_parts[1:]]
+        )
+        if candidate_name in source_names:
+            return candidate_name
+
+    imported_module = imported_modules.get(call_parts[0])
+    if imported_module is not None:
+        candidate_name = ".".join(
+            [imported_module, *call_parts[1:]]
+        )
+        if candidate_name in source_names:
+            return candidate_name
+
+    return None
+
+
+def _resolve_constructor_target(
+    *,
+    constructor_name: str,
+    imported_targets: dict[str, str],
+    imported_modules: dict[str, str],
+    source_names: set[str],
+) -> str | None:
+    """只解析能由导入和源码符号共同证明的构造器。"""
+    constructor_parts = constructor_name.split(".")
+    imported_target = imported_targets.get(
+        constructor_parts[0]
+    )
+    if imported_target is not None:
+        candidate_name = ".".join(
+            [imported_target, *constructor_parts[1:]]
+        )
+        if _matches_source_or_owner(
+            candidate_name,
+            source_names,
+        ):
+            return candidate_name
+
+    imported_module = imported_modules.get(
+        constructor_parts[0]
+    )
+    if imported_module is not None:
+        candidate_name = ".".join(
+            [imported_module, *constructor_parts[1:]]
+        )
+        if _matches_source_or_owner(
+            candidate_name,
+            source_names,
+        ):
+            return candidate_name
+
+    return None
+
+
+def _collect_instance_bindings(
+    *,
+    node: FunctionNode,
+    imported_targets: dict[str, str],
+    imported_modules: dict[str, str],
+    source_names: set[str],
+) -> dict[str, str]:
+    visitor = _InstanceBindingVisitor(
+        imported_targets=imported_targets,
+        imported_modules=imported_modules,
+        source_names=source_names,
+    )
+    for statement in node.body:
+        visitor.visit(statement)
+    return visitor.bindings
+
+
+def _collect_test_class_setup_bindings(
+    *,
+    tree: ast.Module,
+    imported_targets: dict[str, str],
+    imported_modules: dict[str, str],
+    source_names: set[str],
+) -> dict[str, dict[str, str]]:
+    bindings: dict[str, dict[str, str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+
+        class_bindings: dict[str, str] = {}
+        for child in node.body:
+            if not isinstance(child, FunctionNode):
+                continue
+            if child.name not in {
+                "setup_method",
+                "setup_class",
+            }:
+                continue
+            class_bindings.update(
+                _collect_instance_bindings(
+                    node=child,
+                    imported_targets=imported_targets,
+                    imported_modules=imported_modules,
+                    source_names=source_names,
+                )
+            )
+
+        if class_bindings:
+            bindings[node.name] = class_bindings
+
+    return bindings
+
+
+class _InstanceBindingVisitor(ast.NodeVisitor):
+    """收集由明确源码类构造器产生的局部实例。"""
+
+    def __init__(
+        self,
+        *,
+        imported_targets: dict[str, str],
+        imported_modules: dict[str, str],
+        source_names: set[str],
+    ) -> None:
+        self.imported_targets = imported_targets
+        self.imported_modules = imported_modules
+        self.source_names = source_names
+        self.bindings: dict[str, str] = {}
+
+    def _record(
+        self,
+        target: ast.expr,
+        value: ast.expr | None,
+    ) -> None:
+        if not isinstance(value, ast.Call):
+            return
+
+        target_name = _get_call_name(target)
+        constructor_name = _get_call_name(value.func)
+        if target_name is None or constructor_name is None:
+            return
+
+        owner_name = _resolve_constructor_target(
+            constructor_name=constructor_name,
+            imported_targets=self.imported_targets,
+            imported_modules=self.imported_modules,
+            source_names=self.source_names,
+        )
+        if owner_name is not None:
+            self.bindings[target_name] = owner_name
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            self._record(target, node.value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self._record(node.target, node.value)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        return
+
+    def visit_AsyncFunctionDef(
+        self,
+        node: ast.AsyncFunctionDef,
+    ) -> None:
+        return
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        return
 
 def index_python_project_tests(
         project_root: str,

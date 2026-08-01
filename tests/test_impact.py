@@ -665,3 +665,57 @@ def test_runs_changed_test_when_source_has_no_mapping(
             "TestSpec before generating tests"
         )
     ]
+
+
+def test_selects_test_using_instance_from_setup_method(
+    tmp_path,
+):
+    app_path = tmp_path / "app"
+    app_path.mkdir()
+    (app_path / "__init__.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+    (app_path / "service.py").write_text(
+        (
+            "class Service:\n"
+            "    def rule(self, values: dict) -> bool:\n"
+            "        return bool(values)\n"
+        ),
+        encoding="utf-8",
+    )
+
+    tests_path = tmp_path / "tests"
+    tests_path.mkdir()
+    (tests_path / "test_service.py").write_text(
+        (
+            "from app.service import Service\n"
+            "\n"
+            "class TestService:\n"
+            "    def setup_method(self):\n"
+            "        self.service = Service()\n"
+            "\n"
+            "    def test_rule(self):\n"
+            "        assert self.service.rule({}) is False\n"
+        ),
+        encoding="utf-8",
+    )
+
+    selection = select_tests_for_changes(
+        project_root=str(tmp_path),
+        language="python",
+        changed_files={
+            "added": [],
+            "modified": ["app/service.py"],
+            "deleted": [],
+        },
+    )
+
+    assert selection.mode is SelectionMode.DIRECT
+    assert selection.test_files == [
+        "tests/test_service.py",
+    ]
+    assert any(
+        "app.service.Service.rule -> " in evidence
+        for evidence in selection.evidence
+    )
