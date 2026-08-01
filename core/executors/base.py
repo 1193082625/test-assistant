@@ -2,6 +2,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+from core.models.triage import PytestIssue
+
 
 @dataclass
 class TestResult:
@@ -42,6 +44,14 @@ class ExecutionReport:
         )
 
 
+@dataclass(frozen=True)
+class PytestSuiteResult:
+    """pytest 套件执行报告及其结构化生命周期事件。"""
+
+    report: ExecutionReport
+    issues: tuple[PytestIssue, ...] = ()
+
+
 def normalize_process_output(output: str | bytes | None) -> str:
     """将子进程输出统一转换为字符串"""
     if output is None:
@@ -52,6 +62,21 @@ def normalize_process_output(output: str | bytes | None) -> str:
         return output.decode("utf-8", errors="replace")
 
     return output
+
+
+def summarize_process_output(
+    output: str | bytes | None,
+    limit: int = 20_000,
+) -> str:
+    """规范化并限制报告中的进程输出，避免大型套件撑大持久化结果。"""
+    normalized = normalize_process_output(output)
+    if len(normalized) <= limit:
+        return normalized
+    omitted = len(normalized) - limit
+    return (
+        normalized[:limit]
+        + f"\n... [test-assistant omitted {omitted} characters]"
+    )
 
 
 class BaseExecutor(ABC):

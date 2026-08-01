@@ -44,6 +44,7 @@ from .diagnosis import (
     DiagnosisAction,
     DiagnosisActionKind,
 )
+from .triage import PytestIssue, TriagePhase
 
 __all__ = [
     "FrameworkInfo",
@@ -80,4 +81,6 @@ __all__ = [
     "DiagnosisLocation",
     "DiagnosisAction",
     "DiagnosisActionKind",
+    "PytestIssue",
+    "TriagePhase",
 ]
