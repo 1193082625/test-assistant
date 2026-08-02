@@ -45,14 +45,19 @@ def test_three_missing_method_tests_share_one_root_cause(tmp_path):
     (tmp_path / "app/service.py").write_text(
         "class Service:\n    def current(self): pass\n"
     )
+    (tmp_path / "app/other.py").write_text("class Other: pass\n")
     (tmp_path / "test_service.py").write_text(
+        "from app.other import Other\n"
         "from app.service import Service\n"
         "def test_exists():\n"
         "    assert hasattr(Service, '_removed_async')\n"
         "async def test_call():\n"
-        "    await Service()._removed_async()\n"
+        "    service = Service()\n"
+        "    with patch.object(service, '_removed_sync'):\n"
+        "        await service._removed_async()\n"
         "def test_source():\n"
-        "    assert 'await self._removed_async' in 'source'\n"
+        "    source = inspect.getsource(Service.current)\n"
+        "    assert 'await self._removed_async' in source\n"
     )
     issues = tuple(
         _issue(f"test_service.py::{name}")

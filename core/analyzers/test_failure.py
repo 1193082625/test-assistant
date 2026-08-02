@@ -123,6 +123,24 @@ def _test_function(tree: ast.AST, name: str) -> ast.AST | None:
     )
 
 
+def _local_type_bindings(function: ast.AST) -> dict[str, str]:
+    """记录 ``service = Service()`` 这类局部实例与导入类型的关系。"""
+    bindings: dict[str, str] = {}
+    for node in ast.walk(function):
+        if (
+            isinstance(node, (ast.Assign, ast.AnnAssign))
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+        ):
+            targets = (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    bindings[target.id] = node.value.func.id
+    return bindings
+
+
 def _cause_for_node(root: Path, node_id: str) -> FailureRootCause | None:
     test_path_text, _, qualified_test = node_id.partition("::")
     test_path = (root / test_path_text).resolve()
@@ -139,6 +157,12 @@ def _cause_for_node(root: Path, node_id: str) -> FailureRootCause | None:
         for name, value in _imported_sources(tree).items()
         if _source_path(root, value[0]) is not None
     }
+    bindings = _local_type_bindings(function)
+    referenced_types = {
+        node.id
+        for node in ast.walk(function)
+        if isinstance(node, ast.Name) and node.id in imported
+    }
     for decorator in getattr(function, "decorator_list", []):
         if (
             isinstance(decorator, ast.Call)
@@ -151,7 +175,8 @@ def _cause_for_node(root: Path, node_id: str) -> FailureRootCause | None:
             cause = _patch_cause(root, decorator.args[0].value)
             if cause is not None:
                 return cause
-    candidates: list[tuple[str | None, str]] = []
+    direct_candidates: list[tuple[str | None, str]] = []
+    string_candidates: list[tuple[str | None, str]] = []
     for node in ast.walk(function):
         if (
             isinstance(node, ast.Call)
@@ -162,12 +187,28 @@ def _cause_for_node(root: Path, node_id: str) -> FailureRootCause | None:
             and isinstance(node.args[1], ast.Constant)
             and isinstance(node.args[1].value, str)
         ):
-            candidates.append((node.args[0].id, node.args[1].value))
+            direct_candidates.append((node.args[0].id, node.args[1].value))
         elif isinstance(node, ast.Attribute) and node.attr.startswith("_"):
-            candidates.append((None, node.attr))
+            owner = None
+            if isinstance(node.value, ast.Name):
+                owner = bindings.get(node.value.id, node.value.id)
+            elif (
+                isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+            ):
+                owner = node.value.func.id
+            direct_candidates.append((owner, node.attr))
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            candidates.extend((None, match) for match in _PRIVATE_SYMBOL.findall(node.value))
-    for owner, symbol in candidates:
+            owner = (
+                next(iter(referenced_types))
+                if len(referenced_types) == 1
+                else None
+            )
+            string_candidates.extend(
+                (owner, match) for match in _PRIVATE_SYMBOL.findall(node.value)
+            )
+    # 实际属性访问比 mock 参数或说明字符串更接近失败行为。
+    for owner, symbol in (*direct_candidates, *string_candidates):
         cause = _missing_symbol_cause(
             root=root,
             imported=imported,
