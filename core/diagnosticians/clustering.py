@@ -6,6 +6,7 @@ import re
 from pathlib import PurePath
 
 from core.models import FailureCluster, PytestIssue
+from core.analyzers.test_failure import FailureRootCause
 
 
 _ADDRESS = re.compile(r"0x[0-9a-fA-F]+")
@@ -53,14 +54,24 @@ def failure_fingerprint(issue: PytestIssue) -> str:
 
 def cluster_pytest_issues(
     issues: tuple[PytestIssue, ...],
+    root_causes: dict[str, FailureRootCause] | None = None,
 ) -> tuple[FailureCluster, ...]:
     """过滤非失败事件并以稳定指纹确定性聚类。"""
+    root_causes = root_causes or {}
     grouped: dict[str, list[PytestIssue]] = {}
+    grouped_causes: dict[str, FailureRootCause] = {}
     for issue in issues:
         if issue.outcome not in {"failed", "error", "timeout"}:
             continue
-        fingerprint = failure_fingerprint(issue)
+        cause = root_causes.get(issue.node_id or "")
+        fingerprint = (
+            hashlib.sha256(cause.key.encode("utf-8")).hexdigest()
+            if cause is not None
+            else failure_fingerprint(issue)
+        )
         grouped.setdefault(fingerprint, []).append(issue)
+        if cause is not None:
+            grouped_causes[fingerprint] = cause
 
     clusters: list[FailureCluster] = []
     for fingerprint in sorted(grouped):
@@ -78,11 +89,14 @@ def cluster_pytest_issues(
             if issue.node_id is not None
             and issue.phase.value == "execution"
         })
+        cause = grouped_causes.get(fingerprint)
         clusters.append(FailureCluster(
             fingerprint=fingerprint,
             representative_node=(
                 executable_nodes[0] if executable_nodes else None
             ),
             issues=members,
+            root_cause_key=cause.key if cause is not None else None,
+            root_cause_target=cause.target if cause is not None else None,
         ))
     return tuple(clusters)

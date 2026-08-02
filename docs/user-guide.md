@@ -1,6 +1,6 @@
 # test-assistant 真实项目使用指南
 
-> 当前版本：`v0.5.0`
+> 当前版本：`v0.5.1`
 >
 > 更新日期：2026-08-01
 >
@@ -62,14 +62,14 @@ poetry build
 成功后生成：
 
 ```text
-dist/test_assistant-0.5.0-py3-none-any.whl
-dist/test_assistant-0.5.0.tar.gz
+dist/test_assistant-0.5.1-py3-none-any.whl
+dist/test_assistant-0.5.1.tar.gz
 ```
 
 记下 wheel 的绝对路径，例如：
 
 ```text
-/absolute/path/to/test-assistant/dist/test_assistant-0.5.0-py3-none-any.whl
+/absolute/path/to/test-assistant/dist/test_assistant-0.5.1-py3-none-any.whl
 ```
 
 `poetry build` 只生成本地安装包，不会上传或发布。
@@ -128,7 +128,7 @@ python -m pytest --version
 
 ```bash
 python -m pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.5.0-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.5.1-py3-none-any.whl
 ```
 
 验证：
@@ -153,7 +153,7 @@ poetry run python -m pytest --version
 
 ```bash
 poetry run pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.5.0-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.5.1-py3-none-any.whl
 ```
 
 验证：
@@ -267,6 +267,8 @@ test-assistant triage --path . --test-path tests/test_service.py
 test-assistant triage --path . \
   --test-node tests/test_service.py::test_case
 test-assistant triage --path . --max-failures 10
+test-assistant triage --path . --test-path tests/test_service.py \
+  --allow-git-history
 ```
 
 `--test-path` 与 `--test-node` 互斥，且测试路径必须位于目标项目内。退出码定义：
@@ -276,6 +278,18 @@ test-assistant triage --path . --max-failures 10
 - `2`：参数、Runner、环境或持久化错误。
 
 运行记录保存在 `.autotest/triage/<run-id>.json` 和 `latest.json`。失败诊断继续保存在 `.autotest/diagnoses/`，可使用 `diagnose` 与 `report` 查看。
+
+#### 本地 Git 历史授权
+
+默认情况下，`triage` 不读取提交历史，只根据当前测试与源码聚类，证据不足时保持 `INCONCLUSIVE`。第一次希望使用历史证据时明确执行：
+
+```bash
+test-assistant triage --path . \
+  --test-path tests/test_service.py \
+  --allow-git-history
+```
+
+授权保存在当前项目的 `.autotest/permissions.json`，并绑定仓库身份，不是对所有项目的全局授权。授权范围仅为本地只读：工具只使用固定的 `git rev-parse`、`git log -S` 和 `git show`，不执行 fetch/pull/push，不访问网络，也不写入 Git。单次禁用可使用 `--no-git-history`；它不会删除已保存授权。历史缺失、超时或不可读时会安全降级并在 triage 记录中审计。
 
 ## 8. 确定 source path、module path 和目标符号
 
@@ -554,7 +568,7 @@ python -m pytest -q
 ```bash
 python -m pip install \
   --upgrade \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.5.0-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.5.1-py3-none-any.whl
 ```
 
 卸载 CLI：
@@ -626,7 +640,7 @@ python -m pytest path/to/test_file.py --collect-only -q
 
 ## 19. 当前限制
 
-- `triage` 首版只支持 Python/pytest，不调用 LLM，也不自动修复；
+- `triage` 只支持 Python/pytest，不调用 LLM，也不自动修复；
 - 只有当前源码与历史等明确证据确认能力已移除时，才可判旧测试为 `TEST_DEFECT`；
 - 契约冲突保持 `INCONCLUSIVE` 并请求人工确认；
 - 旧 snapshot 不含符号摘要时，`inspect` 会明确降级为 `file_level` 保守分析；

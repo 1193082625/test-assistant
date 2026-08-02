@@ -2,7 +2,7 @@
 
 `test-assistant` 是一个面向 Python/pytest 项目的本地智能测试 CLI。
 
-当前 `v0.5.0` 提供两条相互独立的可信闭环：为新测试执行 TestSpec 审批与候选门禁，以及对项目已有 pytest 套件执行结构化分诊、失败聚类、三次精确复跑和证据归因。
+当前 `v0.5.1` 提供两条相互独立的可信闭环：为新测试执行 TestSpec 审批与候选门禁，以及对项目已有 pytest 套件执行结构化分诊、共同根因聚类、精确复跑和可选的本地 Git 历史归因。
 
 ## 当前能力
 
@@ -194,9 +194,13 @@ poetry run test-assistant triage --path /path/to/demo-project \
   --test-path tests/test_service.py --max-failures 10
 poetry run test-assistant triage --path /path/to/demo-project \
   --test-node tests/test_service.py::test_case
+poetry run test-assistant triage --path /path/to/demo-project \
+  --test-path tests/test_service.py --allow-git-history
 ```
 
 `--test-path` 与 `--test-node` 互斥。退出码 `0` 表示没有未解决问题，`1` 表示存在诊断或未收集到测试，`2` 表示参数、Runner、环境或持久化错误。记录保存在 `.autotest/triage/`，并对密钥、项目绝对路径和大型输出做脱敏或截断。
+
+默认不读取 Git 历史。`--allow-git-history` 会为当前仓库保存一次明确的“本地只读”授权，之后可自动复用；`--no-git-history` 可在单次运行中覆盖它。授权只允许固定白名单的 `git rev-parse`、`git log -S` 与 `git show`，不访问网络、不修改 Git，也不修改目标项目源码或测试。历史不可用时诊断安全降级，不猜测提交意图。
 
 三个执行入口的边界：
 
@@ -216,6 +220,7 @@ poetry run test-assistant triage --path /path/to/demo-project \
 ├── candidates/             隔离候选及 metadata
 ├── test_cases/unit/        人工确认后的正式测试
 ├── diagnoses/              诊断历史与 latest.json
+├── permissions.json        当前仓库的本地 Git 只读授权
 ├── triage/                 版本化套件分诊记录与 latest.json
 ├── verification/           最近一次验证状态
 └── reports/                Markdown 报告
@@ -227,7 +232,7 @@ poetry run test-assistant triage --path /path/to/demo-project \
 - Web Dashboard 和 watch 尚未实现；
 - Vitest 执行器不属于当前 TestSpec 生成闭环；
 - 没有已批准强契约时，稳定失败通常返回 `INCONCLUSIVE`；
-- v0.5.0 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
+- v0.5.1 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
 - 当前使用版本化 JSON，尚未引入 SQLite 或远程服务；
 - 真实 LLM 验证是显式 smoke test，不属于默认自动化测试。
 

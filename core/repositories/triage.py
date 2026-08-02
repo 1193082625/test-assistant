@@ -117,6 +117,7 @@ class TriageRepository:
         reproduction_commands: Mapping[str, str],
         git_sha: str | None = None,
         dependency_digest: str | None = None,
+        git_history_audit: Mapping[str, object] | None = None,
         created_at: datetime | None = None,
     ) -> Path:
         """保存不可覆盖的版本记录，并原子更新 latest。"""
@@ -164,6 +165,12 @@ class TriageRepository:
             truncated_fields=truncated_fields,
             limit=self.STREAM_TEXT_LIMIT,
         )
+        git_history = self._sanitize_object(
+            dict(git_history_audit or {}),
+            field="git_history",
+            truncated_fields=truncated_fields,
+            limit=self.ISSUE_TEXT_LIMIT,
+        )
         status_counts: dict[str, int] = {}
         for test_result in report.test_results:
             status_counts[test_result.status] = (
@@ -203,6 +210,7 @@ class TriageRepository:
             "clusters": clusters,
             "diagnosis_references": references,
             "reproduction_commands": commands,
+            "git_history": git_history,
             "truncation": {
                 "occurred": bool(truncated_fields),
                 "fields": sorted(set(truncated_fields)),

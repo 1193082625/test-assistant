@@ -1,6 +1,7 @@
 """已有 pytest 套件的确定性分组、复跑和归因工作流。"""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping, Protocol
 from uuid import uuid4
 
@@ -10,6 +11,11 @@ from core.diagnosticians import (
     diagnose_execution_preflight,
     diagnose_repeatability,
     repeat_test_execution,
+)
+from core.analyzers import (
+    FailureRootCause,
+    extract_failure_root_causes,
+    read_symbol_history,
 )
 from core.executors.base import (
     ExecutionReport,
@@ -211,11 +217,16 @@ def triage_pytest_suite(
     suite: PytestSuiteResult,
     executor: TriageExecutor,
     evidence_by_node: Mapping[str, TriageEvidence] | None = None,
+    root_causes: Mapping[str, FailureRootCause] | None = None,
+    evidence_by_root_cause: Mapping[str, TriageEvidence] | None = None,
     run_id: str | None = None,
 ) -> TriageResult:
     """按固定优先级为每个失败簇生成一条确定性诊断。"""
     evidence_by_node = evidence_by_node or {}
-    clusters = cluster_pytest_issues(suite.issues)
+    evidence_by_root_cause = evidence_by_root_cause or {}
+    clusters = cluster_pytest_issues(
+        suite.issues, dict(root_causes or {})
+    )
     diagnoses: list[Diagnosis] = []
 
     preflight = diagnose_execution_preflight(
@@ -245,7 +256,10 @@ def triage_pytest_suite(
             continue
 
         node = cluster.representative_node
-        evidence = evidence_by_node.get(node or "", TriageEvidence())
+        evidence = evidence_by_root_cause.get(
+            cluster.root_cause_key or "",
+            evidence_by_node.get(node or "", TriageEvidence()),
+        )
         structure = _test_structure_diagnosis(cluster, evidence)
         if structure is not None:
             diagnoses.append(structure)
@@ -282,3 +296,49 @@ def triage_pytest_suite(
         clusters=clusters,
         diagnoses=tuple(diagnoses),
     )
+
+
+def collect_local_git_triage_evidence(
+    *,
+    project_root: str | Path,
+    suite: PytestSuiteResult,
+) -> tuple[
+    dict[str, FailureRootCause],
+    dict[str, TriageEvidence],
+    tuple[str, ...],
+]:
+    """授权后收集当前源码缺失与本地 Git 删除的最小证据。"""
+    root_causes = extract_failure_root_causes(
+        project_root=project_root,
+        issues=suite.issues,
+    )
+    evidence_by_cause: dict[str, TriageEvidence] = {}
+    degradations: list[str] = []
+    for cause in sorted(
+        set(root_causes.values()), key=lambda item: item.key
+    ):
+        history = read_symbol_history(
+            project_root=project_root,
+            symbol=cause.symbol,
+            source_paths=(cause.source_path,),
+        )
+        if not history.available:
+            degradations.append(
+                f"{cause.target}: {history.degradation_reason}"
+            )
+            continue
+        if not history.removal_confirmed:
+            continue
+        details = (
+            f"target={cause.target}",
+            "current_source=missing",
+            "git_history=added_then_deleted",
+            f"deletion_commit={history.deletion_commit}",
+        )
+        evidence_by_cause[cause.key] = TriageEvidence(
+            missing_symbol=True,
+            removal_confirmed=True,
+            obsolete_dependency_mock=(cause.kind == "obsolete_patch"),
+            details=details,
+        )
+    return root_causes, evidence_by_cause, tuple(degradations)

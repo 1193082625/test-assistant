@@ -13,6 +13,7 @@ from .diagnosis import (
 from .test_spec import TestSpecRepository
 from .verification import VerificationStateRepository
 from .triage import TriageRepository
+from .permissions import GitPermissionRepository, git_repository_identity
 
 __all__ = [
     "DiagnosisRepository",
@@ -24,4 +25,6 @@ __all__ = [
     "CandidateDiff",
     "CandidateApproval",
     "TriageRepository",
+    "GitPermissionRepository",
+    "git_repository_identity",
 ]

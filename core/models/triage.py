@@ -78,6 +78,8 @@ class FailureCluster:
     fingerprint: str
     representative_node: str | None
     issues: tuple[PytestIssue, ...]
+    root_cause_key: str | None = None
+    root_cause_target: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.fingerprint, str) or not self.fingerprint:
@@ -92,6 +94,8 @@ class FailureCluster:
             "fingerprint": self.fingerprint,
             "representative_node": self.representative_node,
             "issues": [issue.to_dict() for issue in self.issues],
+            "root_cause_key": self.root_cause_key,
+            "root_cause_target": self.root_cause_target,
         }
 
     @classmethod
@@ -103,6 +107,8 @@ class FailureCluster:
             fingerprint=data["fingerprint"],
             representative_node=data.get("representative_node"),
             issues=tuple(PytestIssue.from_dict(issue) for issue in issues),
+            root_cause_key=data.get("root_cause_key"),
+            root_cause_target=data.get("root_cause_target"),
         )
 
 

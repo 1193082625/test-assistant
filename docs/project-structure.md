@@ -1,6 +1,6 @@
 # test-assistant 项目结构
 
-> 当前版本：`v0.5.0`
+> 当前版本：`v0.5.1`
 >
 > 更新日期：2026-08-01
 >
@@ -133,9 +133,9 @@ flowchart TD
 ```mermaid
 flowchart LR
     A["triage suite"] --> B["pytest hook JSON"]
-    B --> C["稳定失败聚类"]
-    C --> D["代表 node 复跑 3 次"]
-    D --> E["五类确定性归因"]
+    B --> C["AST 共同根因聚类"]
+    C --> D["授权后读取本地 Git 删除证据"]
+    D --> E["代表 node 复跑与确定性归因"]
     E --> F["diagnoses + triage/latest.json"]
 ```
 
@@ -145,6 +145,7 @@ flowchart LR
 .autotest/
 ├── config.yml                         目标项目配置
 ├── snapshot.json                      增量分析基线
+├── permissions.json                   仓库级本地 Git 只读授权
 ├── plans/
 │   └── spec-*.json                    版本化 TestSpec
 ├── candidates/
@@ -171,6 +172,7 @@ flowchart LR
 - 正式测试写入前必须通过门禁并由用户确认 diff。
 - `verify` 只执行用户指定的精确 pytest node。
 - `triage` 不需要 TestSpec，不调用 LLM，也不修改源码、测试、审批状态或 snapshot。
+- 未经仓库级明确授权，`triage` 不读取 Git 历史；授权后仍禁止网络访问和 Git 修改。
 - `PRODUCT_DEFECT` 需要已批准强契约、通过的测试门禁和同环境稳定失败。
 - 证据不足时返回 `INCONCLUSIVE`，不以高置信度猜测。
 - 成功验证不删除历史诊断，但会更新当前健康状态。
@@ -187,6 +189,10 @@ tests/test_cli_verify.py               真实 pytest 三次验证
 tests/test_cli_triage.py               triage 参数、范围、退出码和持久化
 tests/test_triage_workflow.py          五类归因、聚类代表和三次复跑
 tests/test_triage_repository.py        triage 原子存储、脱敏、限长和路径边界
+tests/test_git_permission_repository.py 仓库身份绑定的本地只读授权
+tests/test_git_history.py              白名单 Git 历史证据与安全降级
+tests/test_failure_root_causes.py      AST 共同根因提取与聚类
+tests/test_triage_git_attribution.py   删除历史自动归因
 tests/test_candidate_workflow.py       候选 workflow
 tests/test_verification_workflow.py    验证 workflow
 tests/test_failure_attribution.py      证据归因决策表

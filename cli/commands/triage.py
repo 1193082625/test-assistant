@@ -4,11 +4,17 @@ from pathlib import Path
 
 import click
 
+from core.analyzers import extract_failure_root_causes
 from core.executors import PytestExecutor
-from core.repositories import DiagnosisRepository, TriageRepository
+from core.repositories import (
+    DiagnosisRepository,
+    GitPermissionRepository,
+    TriageRepository,
+)
 from core.workflows import (
     build_dependency_digest,
     build_reproduction_command,
+    collect_local_git_triage_evidence,
     read_git_sha,
     triage_pytest_suite,
 )
@@ -117,6 +123,32 @@ def _render_result(result, record_path: Path) -> None:
     click.echo(f"Triage 记录: {record_path}")
 
 
+def _git_history_permission(
+    *,
+    root: Path,
+    allow_git_history: bool,
+    no_git_history: bool,
+) -> bool:
+    if allow_git_history and no_git_history:
+        raise click.UsageError(
+            "--allow-git-history 与 --no-git-history 不能同时使用"
+        )
+    repository = GitPermissionRepository(root)
+    if allow_git_history:
+        repository.grant()
+        return True
+    if no_git_history:
+        return False
+    return repository.is_granted()
+
+
+def _render_git_boundary(enabled: bool) -> None:
+    state = "已授权（本地只读）" if enabled else "未授权，诊断安全降级"
+    click.echo(f"Git 历史证据: {state}")
+    click.echo("网络访问: 禁止")
+    click.echo("Git 修改: 禁止")
+
+
 @click.command("triage")
 @click.option(
     "--path",
@@ -133,11 +165,23 @@ def _render_result(result, record_path: Path) -> None:
     type=click.IntRange(min=1),
     help="达到指定失败数后停止 pytest",
 )
+@click.option(
+    "--allow-git-history",
+    is_flag=True,
+    help="为当前仓库授权读取本地 Git 历史并持久保存授权",
+)
+@click.option(
+    "--no-git-history",
+    is_flag=True,
+    help="本次运行不读取 Git 历史（覆盖已保存授权）",
+)
 def triage_command(
     project_path: Path,
     test_path: str | None,
     test_node: str | None,
     max_failures: int | None,
+    allow_git_history: bool,
+    no_git_history: bool,
 ) -> None:
     """运行已有 pytest 套件，聚类、复跑并保存确定性诊断。"""
     root = project_path.resolve()
@@ -148,13 +192,35 @@ def triage_command(
     )
     executor = PytestExecutor(cwd=str(root))
     try:
+        git_history_enabled = _git_history_permission(
+            root=root,
+            allow_git_history=allow_git_history,
+            no_git_history=no_git_history,
+        )
+        _render_git_boundary(git_history_enabled)
         suite = executor.execute_suite(
             scope,
             max_failures=max_failures,
         )
+        if git_history_enabled:
+            root_causes, git_evidence, degradations = (
+                collect_local_git_triage_evidence(
+                    project_root=root,
+                    suite=suite,
+                )
+            )
+        else:
+            root_causes = extract_failure_root_causes(
+                project_root=root,
+                issues=suite.issues,
+            )
+            git_evidence = {}
+            degradations = ()
         result = triage_pytest_suite(
             suite=suite,
             executor=executor,
+            root_causes=root_causes,
+            evidence_by_root_cause=git_evidence,
         )
         commands = {
             cluster.fingerprint: build_reproduction_command(
@@ -175,6 +241,15 @@ def triage_command(
             reproduction_commands=commands,
             git_sha=read_git_sha(root),
             dependency_digest=build_dependency_digest(root),
+            git_history_audit={
+                "enabled": git_history_enabled,
+                "scope": (
+                    "local_read_only" if git_history_enabled else "disabled"
+                ),
+                "network_access": False,
+                "git_mutation": False,
+                "degradations": list(degradations),
+            },
         )
     except (OSError, TypeError, ValueError) as error:
         _exit_error(str(error))
