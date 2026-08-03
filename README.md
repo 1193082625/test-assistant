@@ -2,7 +2,7 @@
 
 `test-assistant` 是一个面向 Python/pytest 项目的本地智能测试 CLI。
 
-当前 `v0.5.1` 提供两条相互独立的可信闭环：为新测试执行 TestSpec 审批与候选门禁，以及对项目已有 pytest 套件执行结构化分诊、共同根因聚类、精确复跑和可选的本地 Git 历史归因。
+当前 `v0.5.2` 提供两条相互独立的可信闭环：为新测试执行 TestSpec 审批与候选门禁，以及对项目已有 pytest 套件执行结构化分诊、共同根因聚类、精确复跑和可选的本地 Git 历史归因。
 
 ## 当前能力
 
@@ -16,6 +16,8 @@
 - 对已有 pytest 套件解析 collection、setup、call、skip 和 warning 事件；
 - 按稳定指纹聚类失败，并用代表 node 精确复跑三次；
 - 区分产品缺陷、测试缺陷、基础设施故障、Flaky 和证据不足；
+- 自动识别配置默认值、字段类型、可选字段、关联配置和枚举契约迁移；
+- 识别 AsyncMock Result 与异步生成器生命周期中的测试 fixture 漂移；
 - 原子保存 TestSpec、候选、验证状态、脱敏诊断和 triage 运行记录。
 
 ## 安全原则
@@ -202,6 +204,8 @@ poetry run test-assistant triage --path /path/to/demo-project \
 
 默认不读取 Git 历史。`--allow-git-history` 会为当前仓库保存一次明确的“本地只读”授权，之后可自动复用；`--no-git-history` 可在单次运行中覆盖它。授权只允许固定白名单的 `git rev-parse`、`git log -S` 与 `git show`，不访问网络、不修改 Git，也不修改目标项目源码或测试。历史不可用时诊断安全降级，不猜测提交意图。
 
+契约迁移只有在当前实现至少两个独立来源一致，且同一 Git 提交同时删除旧表达式、增加当前表达式时，才会输出 `TEST_DEFECT / HIGH`。AsyncMock Result 和异步生成器生命周期不依赖 Git，但必须同时具备 warning、测试 AST 和受支持运行时契约证据。所有建议都需要人工执行，`triage` 不自动修改测试。
+
 三个执行入口的边界：
 
 - `run`：基于 snapshot 选择受变更影响的已有测试；
@@ -232,7 +236,7 @@ poetry run test-assistant triage --path /path/to/demo-project \
 - Web Dashboard 和 watch 尚未实现；
 - Vitest 执行器不属于当前 TestSpec 生成闭环；
 - 没有已批准强契约时，稳定失败通常返回 `INCONCLUSIVE`；
-- v0.5.1 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
+- v0.5.2 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
 - 当前使用版本化 JSON，尚未引入 SQLite 或远程服务；
 - 真实 LLM 验证是显式 smoke test，不属于默认自动化测试。
 

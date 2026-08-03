@@ -1,8 +1,8 @@
 # test-assistant 项目结构
 
-> 当前版本：`v0.5.1`
+> 当前版本：`v0.5.2`
 >
-> 更新日期：2026-08-01
+> 更新日期：2026-08-03
 >
 > 适用范围：当前仓库中的 Python/pytest 可信 CLI
 
@@ -74,6 +74,9 @@ core/
 | `models/triage.py` | pytest issue、失败簇和 suite triage 结果 |
 | `analyzers/source.py` | Python 符号、可测性、导入关系和测试索引 |
 | `analyzers/contract.py` | docstring、类型提示、Schema 和已有测试证据 |
+| `analyzers/contract_migration.py` | 从失败测试、Pydantic 错误和 warning 提取旧契约候选 |
+| `analyzers/current_contract.py` | 不导入目标模块地验证配置、类型、枚举与异步 API 当前一致性 |
+| `analyzers/git_history.py` | 白名单本地 Git 符号删除与同提交契约迁移证据 |
 | `planners/test_spec.py` | 校验 LLM JSON 并构造 proposed TestSpec |
 | `generators/test_spec.py` | 只允许 approved TestSpec 进入生成器 |
 | `validators/python.py` | 候选测试门禁和副作用检查 |
@@ -134,9 +137,10 @@ flowchart TD
 flowchart LR
     A["triage suite"] --> B["pytest hook JSON"]
     B --> C["AST 共同根因聚类"]
-    C --> D["授权后读取本地 Git 删除证据"]
-    D --> E["代表 node 复跑与确定性归因"]
-    E --> F["diagnoses + triage/latest.json"]
+    C --> D["提取失败契约并验证当前静态契约"]
+    D --> E["授权后读取本地 Git 删除或迁移证据"]
+    E --> F["代表 node 复跑与确定性归因"]
+    F --> G["diagnoses + triage/latest.json"]
 ```
 
 ## 目标项目中的 `.autotest`
@@ -191,6 +195,10 @@ tests/test_triage_workflow.py          五类归因、聚类代表和三次复�
 tests/test_triage_repository.py        triage 原子存储、脱敏、限长和路径边界
 tests/test_git_permission_repository.py 仓库身份绑定的本地只读授权
 tests/test_git_history.py              白名单 Git 历史证据与安全降级
+tests/test_git_contract_history.py     同一提交旧→新契约迁移证据
+tests/test_contract_migration_analyzer.py 失败契约、warning 与生命周期提取
+tests/test_current_contract.py         当前静态契约一致性与冲突降级
+tests/test_triage_contract_migration.py 契约迁移高置信度决策表
 tests/test_failure_root_causes.py      AST 共同根因提取与聚类
 tests/test_triage_git_attribution.py   删除历史自动归因
 tests/test_candidate_workflow.py       候选 workflow

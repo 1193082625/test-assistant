@@ -45,6 +45,8 @@ from .diagnosis import (
     DiagnosisActionKind,
 )
 from .triage import (
+    ContractMigrationEvidence,
+    ContractMigrationType,
     FailureCluster,
     PytestIssue,
     TriagePhase,
@@ -52,6 +54,8 @@ from .triage import (
 )
 
 __all__ = [
+    "ContractMigrationEvidence",
+    "ContractMigrationType",
     "FrameworkInfo",
     "Language",
     "ProjectAnalysis",

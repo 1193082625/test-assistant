@@ -171,6 +171,32 @@ class TriageRepository:
             truncated_fields=truncated_fields,
             limit=self.ISSUE_TEXT_LIMIT,
         )
+        contract_migrations: list[dict[str, object]] = []
+        for diagnosis in result.diagnoses:
+            for evidence in diagnosis.evidence:
+                if evidence.source != "contract_migration":
+                    continue
+                structured: dict[str, object] = {
+                    "category": diagnosis.category.value,
+                    "confidence": diagnosis.confidence.value,
+                }
+                current_sources: list[str] = []
+                for detail in evidence.details:
+                    key, separator, value = detail.partition("=")
+                    if not separator:
+                        continue
+                    if key == "current_source":
+                        current_sources.append(value)
+                    else:
+                        structured[key] = value
+                structured["current_sources"] = current_sources
+                contract_migrations.append(structured)
+        safe_contract_migrations = self._sanitize_object(
+            contract_migrations,
+            field="contract_migrations",
+            truncated_fields=truncated_fields,
+            limit=self.ISSUE_TEXT_LIMIT,
+        )
         status_counts: dict[str, int] = {}
         for test_result in report.test_results:
             status_counts[test_result.status] = (
@@ -211,6 +237,7 @@ class TriageRepository:
             "diagnosis_references": references,
             "reproduction_commands": commands,
             "git_history": git_history,
+            "contract_migrations": safe_contract_migrations,
             "truncation": {
                 "occurred": bool(truncated_fields),
                 "fields": sorted(set(truncated_fields)),

@@ -9,6 +9,8 @@ from core.executors.base import (
     TestResult as ExecutionTestResult,
 )
 from core.models import (
+    ContractMigrationEvidence,
+    ContractMigrationType,
     Diagnosis,
     DiagnosisLocation,
     FailureCluster,
@@ -16,6 +18,7 @@ from core.models import (
     TriagePhase,
     TriageResult,
 )
+from core.workflows.triage import TriageEvidence, triage_pytest_suite
 from core.reporters import render_triage_markdown
 from core.repositories import TriageRepository
 
@@ -218,3 +221,53 @@ def test_triage_reporter_uses_persisted_safe_summary(tmp_path):
     assert "pytest 退出码：`1`" in markdown
     assert "失败簇：`1`" in markdown
     assert "failed: 1" in markdown
+
+
+def test_repository_persists_structured_contract_migration(tmp_path):
+    class Executor:
+        def execute(self, file_path):
+            return ExecutionReport(exit_code=1, error_type="test_failure")
+
+    base = _result(tmp_path, run_id="migration-001")
+    node = base.clusters[0].representative_node
+    suite = __import__(
+        "core.executors.base", fromlist=["PytestSuiteResult"]
+    ).PytestSuiteResult(
+        report=base.report,
+        issues=base.clusters[0].issues,
+    )
+    result = triage_pytest_suite(
+        suite=suite,
+        executor=Executor(),
+        evidence_by_node={
+            node: TriageEvidence(contract_migration=ContractMigrationEvidence(
+                migration_type=ContractMigrationType.CONFIG_DEFAULT,
+                target="settings.VALUE",
+                old_contract="10",
+                current_contract="120",
+                current_sources=("app/config.py", "app/service.py"),
+                migration_commit="a" * 40,
+                current_consistent=True,
+                history_confirmed=True,
+            ))
+        },
+        run_id="migration-001",
+    )
+    repository = TriageRepository(tmp_path)
+    repository.save(
+        result=result,
+        diagnosis_references=(".autotest/diagnoses/d1.json",),
+        reproduction_commands={
+            result.clusters[0].fingerprint: "python -m pytest test.py -q"
+        },
+    )
+
+    migration = repository.load_latest()["contract_migrations"][0]
+    assert migration["migration_type"] == "config_default"
+    assert migration["old_contract"] == "10"
+    assert migration["current_contract"] == "120"
+    assert migration["migration_commit"] == "a" * 40
+    assert migration["current_sources"] == [
+        "app/config.py",
+        "app/service.py",
+    ]

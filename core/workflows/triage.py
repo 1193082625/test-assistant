@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Mapping, Protocol
 from uuid import uuid4
 
@@ -13,9 +14,20 @@ from core.diagnosticians import (
     repeat_test_execution,
 )
 from core.analyzers import (
+    ContractMismatchKind,
     FailureRootCause,
+    extract_contract_mismatches,
+    read_contract_history,
     extract_failure_root_causes,
     read_symbol_history,
+)
+from core.analyzers.current_contract import (
+    ContractEvidenceStatus,
+    analyze_async_result_contract,
+    analyze_config_contract,
+    analyze_enum_contract,
+    analyze_optional_field_contract,
+    analyze_type_contract,
 )
 from core.executors.base import (
     ExecutionReport,
@@ -31,6 +43,8 @@ from core.models import (
     DiagnosisEvidenceKind,
     DiagnosisLocation,
     EvidenceKind,
+    ContractMigrationEvidence,
+    ContractMigrationType,
     TriageResult,
     TriagePhase,
 )
@@ -53,6 +67,7 @@ class TriageEvidence:
     supporting_test_count: int = 0
     implementation_violates_contract: bool = False
     details: tuple[str, ...] = ()
+    contract_migration: ContractMigrationEvidence | None = None
 
 
 def _location(cluster: FailureCluster) -> DiagnosisLocation:
@@ -186,6 +201,96 @@ def _contract_diagnosis(
     )
 
 
+def _migration_diagnosis(
+    cluster: FailureCluster,
+    evidence: TriageEvidence,
+) -> Diagnosis | None:
+    migration = evidence.contract_migration
+    if migration is None:
+        return None
+    base_details = (
+        f"migration_type={migration.migration_type.value}",
+        f"target={migration.target}",
+        f"old_contract={migration.old_contract}",
+        f"current_contract={migration.current_contract}",
+        f"current_consistent={str(migration.current_consistent).lower()}",
+        *(f"current_source={source}" for source in migration.current_sources),
+    )
+    if migration.migration_commit:
+        base_details += (
+            f"migration_commit={migration.migration_commit}",
+        )
+    if migration.warning_source:
+        base_details += (f"warning_source={migration.warning_source}",)
+    if migration.lifecycle_gap:
+        base_details += (
+            f"lifecycle_gap={','.join(migration.lifecycle_gap)}",
+        )
+    if migration.conflict_reason:
+        return Diagnosis(
+            summary="当前契约证据冲突，不能确认测试已过期",
+            category=DiagnosisCategory.INCONCLUSIVE,
+            confidence=DiagnosisConfidence.LOW,
+            evidence=_evidence(
+                description="契约迁移候选未通过当前一致性门禁",
+                source="contract_migration",
+                details=base_details + (
+                    f"conflict={migration.conflict_reason}",
+                ),
+            ),
+            locations=(_location(cluster),),
+            suggested_actions=(DiagnosisAction(
+                kind=DiagnosisActionKind.REQUEST_CONFIRMATION,
+                description="确认 Schema、实现和配置中的当前业务契约",
+            ),),
+        )
+    if not migration.high_confidence:
+        return Diagnosis(
+            summary="契约迁移证据不完整",
+            category=DiagnosisCategory.INCONCLUSIVE,
+            confidence=DiagnosisConfidence.LOW,
+            evidence=_evidence(
+                description="缺少当前一致性、历史迁移或运行时边界证据",
+                source="contract_migration",
+                details=base_details,
+            ),
+            locations=(_location(cluster),),
+            suggested_actions=(DiagnosisAction(
+                kind=DiagnosisActionKind.REQUEST_CONFIRMATION,
+                description="补充本地只读历史或检查异步 API 契约",
+            ),),
+        )
+    runtime = migration.is_runtime_boundary
+    if migration.migration_type is ContractMigrationType.ASYNC_GENERATOR_LIFECYCLE:
+        action = "使用 await anext(gen)，并在 finally 中 await gen.aclose()"
+    elif migration.migration_type is ContractMigrationType.ASYNC_MOCK_RESULT:
+        action = "为异步入口配置同步 Result 对象，不让子 AsyncMock 充当结果"
+    else:
+        action = "按已确认的当前契约更新旧测试，不修改产品实现"
+    return Diagnosis(
+        summary=(
+            "测试 fixture 的异步运行时契约已过期"
+            if runtime else "Git 与当前源码确认测试仍使用旧契约"
+        ),
+        category=DiagnosisCategory.TEST_DEFECT,
+        confidence=DiagnosisConfidence.HIGH,
+        evidence=_evidence(
+            description=(
+                "traceback、静态调用和 API 契约形成闭合证据"
+                if runtime else "当前双来源契约与同一迁移提交形成闭合证据"
+            ),
+            source="contract_migration",
+            details=base_details,
+            kind=DiagnosisEvidenceKind.TEST_VALIDATION,
+        ),
+        locations=(_location(cluster),),
+        suggested_actions=(DiagnosisAction(
+            kind=DiagnosisActionKind.FIX_TEST,
+            description=action,
+        ),),
+    )
+
+
 def _inconclusive_diagnosis(
     cluster: FailureCluster,
     reports: tuple[ExecutionReport, ...],
@@ -285,9 +390,12 @@ def triage_pytest_suite(
             diagnoses.append(repeatability)
             continue
 
+        migration = _migration_diagnosis(cluster, evidence)
         contract = _contract_diagnosis(cluster, evidence)
         diagnoses.append(
-            contract or _inconclusive_diagnosis(cluster, reports)
+            migration
+            or contract
+            or _inconclusive_diagnosis(cluster, reports)
         )
 
     return TriageResult(
@@ -342,3 +450,190 @@ def collect_local_git_triage_evidence(
             details=details,
         )
     return root_causes, evidence_by_cause, tuple(degradations)
+
+
+def _project_python_sources(root: Path) -> dict[str, str]:
+    """读取有限的项目内 Python 源码；排除测试、缓存和工具产物。"""
+    sources: dict[str, str] = {}
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        if any(part in {
+            ".git", ".autotest", ".venv", "venv", "__pycache__", "tests"
+        } for part in relative.parts):
+            continue
+        if len(sources) >= 500:
+            break
+        try:
+            if path.stat().st_size > 250_000:
+                continue
+            sources[relative.as_posix()] = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+    return sources
+
+
+def _actual_from_failure(message: str) -> str | None:
+    patterns = (
+        r"\bgot\s+([^\n,]+)",
+        r"E\s+assert\s+([^\s]+)\s+==",
+        r"input_value=([^,\]]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, message)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def collect_contract_migration_triage_evidence(
+    *,
+    project_root: str | Path,
+    suite: PytestSuiteResult,
+    git_history_enabled: bool,
+) -> tuple[dict[str, TriageEvidence], tuple[str, ...]]:
+    """从失败 node 自动闭合测试、当前源码与可选 Git 迁移证据。"""
+    root = Path(project_root).resolve()
+    source_files = _project_python_sources(root)
+    evidence_by_node: dict[str, TriageEvidence] = {}
+    degradations: list[str] = []
+    for issue in suite.issues:
+        if not issue.node_id or issue.node_id in evidence_by_node:
+            continue
+        test_path_text = issue.node_id.partition("::")[0]
+        test_path = (root / test_path_text).resolve()
+        try:
+            test_path.relative_to(root)
+            test_source = test_path.read_text(encoding="utf-8")
+        except (ValueError, OSError, UnicodeError):
+            continue
+        mismatches = extract_contract_mismatches(
+            test_source=test_source,
+            failure_message=issue.message,
+            source_path="<project-source>",
+            test_path=test_path_text,
+        )
+        for mismatch in mismatches:
+            migration_type: ContractMigrationType
+            current_evidence = None
+            runtime_confirmed = False
+            if mismatch.kind is ContractMismatchKind.VALUE:
+                migration_type = ContractMigrationType.CONFIG_DEFAULT
+                current_evidence = analyze_config_contract(
+                    target=mismatch.target, source_files=source_files
+                )
+            elif mismatch.kind is ContractMismatchKind.TYPE:
+                migration_type = ContractMigrationType.FIELD_TYPE
+                current_evidence = analyze_type_contract(
+                    target=mismatch.target, source_files=source_files
+                )
+            elif mismatch.kind is ContractMismatchKind.OPTIONAL_FIELD:
+                migration_type = ContractMigrationType.OPTIONAL_FIELDS
+                current_evidence = analyze_optional_field_contract(
+                    target=mismatch.target, source_files=source_files
+                )
+            elif mismatch.kind is ContractMismatchKind.DERIVED_VALUE:
+                migration_type = ContractMigrationType.RELATED_CONFIG
+                current_evidence = analyze_config_contract(
+                    target=mismatch.dependencies[0], source_files=source_files
+                ) if mismatch.dependencies else None
+            elif mismatch.kind is ContractMismatchKind.ENUM:
+                migration_type = ContractMigrationType.ENUM_VALUES
+                current_evidence = analyze_enum_contract(
+                    target=mismatch.target, source_files=source_files
+                )
+            elif mismatch.kind is ContractMismatchKind.ASYNC_MOCK_RESULT:
+                migration_type = ContractMigrationType.ASYNC_MOCK_RESULT
+                current_evidence = analyze_async_result_contract(
+                    source_files=source_files
+                )
+                runtime_confirmed = (
+                    current_evidence.status is ContractEvidenceStatus.CONFIRMED
+                    and bool(mismatch.warning_source)
+                )
+            elif mismatch.kind is ContractMismatchKind.ASYNC_GENERATOR_LIFECYCLE:
+                migration_type = ContractMigrationType.ASYNC_GENERATOR_LIFECYCLE
+                generator_contract = any(
+                    "async def " in source
+                    and "yield " in source
+                    and "finally:" in source
+                    for source in source_files.values()
+                )
+                runtime_confirmed = generator_contract and bool(
+                    mismatch.warning_source
+                )
+                current_evidence = None
+            else:
+                continue
+
+            current_status = (
+                current_evidence.status
+                if current_evidence is not None
+                else (
+                    ContractEvidenceStatus.CONFIRMED
+                    if runtime_confirmed
+                    else ContractEvidenceStatus.INSUFFICIENT
+                )
+            )
+            current_value = (
+                current_evidence.current
+                if current_evidence is not None
+                else "awaited and closed async generator"
+            )
+            current_sources = (
+                current_evidence.sources
+                if current_evidence is not None
+                else tuple(
+                    path for path, source in source_files.items()
+                    if "async def " in source and "yield " in source
+                )[:2]
+            )
+            actual = _actual_from_failure(issue.message)
+            if current_value is None and actual is not None:
+                current_value = actual
+            history_confirmed = False
+            migration_commit = None
+            if (
+                git_history_enabled
+                and not runtime_confirmed
+                and mismatch.expected is not None
+                and current_value is not None
+                and current_sources
+            ):
+                history = read_contract_history(
+                    project_root=root,
+                    old_expression=str(mismatch.expected),
+                    new_expression=str(current_value),
+                    source_paths=current_sources,
+                )
+                history_confirmed = history.migration_confirmed
+                migration_commit = history.migration_commit
+                if not history.available:
+                    degradations.append(
+                        f"{mismatch.target}: {history.degradation_reason}"
+                    )
+            contract = ContractMigrationEvidence(
+                migration_type=migration_type,
+                target=mismatch.target,
+                old_contract=str(mismatch.expected),
+                current_contract=str(current_value),
+                current_sources=current_sources,
+                migration_commit=migration_commit,
+                current_consistent=(
+                    current_status is ContractEvidenceStatus.CONFIRMED
+                ),
+                history_confirmed=history_confirmed,
+                runtime_boundary_confirmed=runtime_confirmed,
+                warning_source=mismatch.warning_source,
+                lifecycle_gap=mismatch.missing_lifecycle_steps,
+                conflict_reason=(
+                    current_evidence.conflict_reason
+                    if current_evidence is not None
+                    and current_status is ContractEvidenceStatus.CONFLICT
+                    else None
+                ),
+            )
+            evidence_by_node[issue.node_id] = TriageEvidence(
+                contract_migration=contract
+            )
+            break
+    return evidence_by_node, tuple(degradations)

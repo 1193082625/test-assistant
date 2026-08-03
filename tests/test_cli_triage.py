@@ -344,3 +344,44 @@ def test_triage_persistence_error_uses_exit_code_two(tmp_path, monkeypatch):
 
     assert result.exit_code == 2
     assert "disk full" in result.output
+
+
+def test_render_contract_migration_uses_explicit_labels(tmp_path, monkeypatch):
+    from core.models import (
+        ContractMigrationEvidence,
+        ContractMigrationType,
+    )
+    from core.workflows.triage import TriageEvidence
+
+    _write_project(tmp_path, "def test_bad():\n    assert 10 == 120\n")
+    original = triage_module.triage_pytest_suite
+
+    def add_migration(**kwargs):
+        suite = kwargs["suite"]
+        node = suite.issues[0].node_id
+        kwargs["evidence_by_node"] = {
+            node: TriageEvidence(contract_migration=ContractMigrationEvidence(
+                migration_type=ContractMigrationType.CONFIG_DEFAULT,
+                target="settings.VALUE",
+                old_contract="10",
+                current_contract="120",
+                current_sources=("app/config.py", "app/service.py"),
+                migration_commit="a" * 40,
+                current_consistent=True,
+                history_confirmed=True,
+            ))
+        }
+        return original(**kwargs)
+
+    monkeypatch.setattr(
+        triage_module, "triage_pytest_suite", add_migration
+    )
+    result = CliRunner().invoke(
+        cli,
+        ["triage", "--path", str(tmp_path), "--test-path", "tests/test_demo.py"],
+    )
+    assert result.exit_code == 1, result.output
+    assert "迁移类型: config_default" in result.output
+    assert "旧契约: 10" in result.output
+    assert "当前契约: 120" in result.output
+    assert "migration_commit: " + "a" * 40 in result.output

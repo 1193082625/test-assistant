@@ -1,8 +1,8 @@
 # test-assistant 真实项目使用指南
 
-> 当前版本：`v0.5.1`
+> 当前版本：`v0.5.2`
 >
-> 更新日期：2026-08-01
+> 更新日期：2026-08-03
 >
 > 当前主流程：Python 3.13 + pytest
 
@@ -62,14 +62,14 @@ poetry build
 成功后生成：
 
 ```text
-dist/test_assistant-0.5.1-py3-none-any.whl
-dist/test_assistant-0.5.1.tar.gz
+dist/test_assistant-0.5.2-py3-none-any.whl
+dist/test_assistant-0.5.2.tar.gz
 ```
 
 记下 wheel 的绝对路径，例如：
 
 ```text
-/absolute/path/to/test-assistant/dist/test_assistant-0.5.1-py3-none-any.whl
+/absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
 ```
 
 `poetry build` 只生成本地安装包，不会上传或发布。
@@ -133,7 +133,7 @@ python -m pip uninstall -y test-assistant
 
 ```bash
 python -m pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.5.1-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
 ```
 
 验证：
@@ -158,7 +158,7 @@ poetry run python -m pytest --version
 
 ```bash
 poetry run pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.5.1-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
 ```
 
 验证：
@@ -295,6 +295,12 @@ test-assistant triage --path . \
 ```
 
 授权保存在当前项目的 `.autotest/permissions.json`，并绑定仓库身份，不是对所有项目的全局授权。授权范围仅为本地只读：工具只使用固定的 `git rev-parse`、`git log -S` 和 `git show`，不执行 fetch/pull/push，不访问网络，也不写入 Git。单次禁用可使用 `--no-git-history`；它不会删除已保存授权。历史缺失、超时或不可读时会安全降级并在 triage 记录中审计。
+
+#### v0.5.2 契约迁移归因
+
+`triage` 可以从失败断言、Pydantic ValidationError 和未等待协程 warning 中提取旧契约候选，并静态检查当前配置、实现、ORM、Schema 或路由是否一致。配置值、字段类型、可选字段、关联配置和枚举变化只有在当前至少两个来源一致，且授权后的本地 Git 历史确认同一提交删除旧表达式并增加当前表达式时，才会归为 `TEST_DEFECT / HIGH`。
+
+AsyncMock Result 和异步生成器生命周期不要求 Git 历史，但必须具备 traceback/warning、测试 AST 和生产端 API 或清理结构三类一致证据。证据不足或 Schema 与实现冲突时仍返回 `INCONCLUSIVE / LOW`。工具只展示修复建议，不会自动修改目标测试或源码。
 
 ## 8. 确定 source path、module path 和目标符号
 
@@ -573,7 +579,7 @@ python -m pytest -q
 ```bash
 python -m pip install \
   --upgrade \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.5.1-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
 ```
 
 卸载 CLI：

@@ -21,6 +21,55 @@ class TriagePhase(StrEnum):
     WARNING = "warning"
 
 
+class ContractMigrationType(StrEnum):
+    CONFIG_DEFAULT = "config_default"
+    FIELD_TYPE = "field_type"
+    OPTIONAL_FIELDS = "optional_fields"
+    RELATED_CONFIG = "related_config"
+    ENUM_VALUES = "enum_values"
+    ASYNC_MOCK_RESULT = "async_mock_result"
+    ASYNC_GENERATOR_LIFECYCLE = "async_generator_lifecycle"
+
+
+@dataclass(frozen=True)
+class ContractMigrationEvidence:
+    """已经过当前契约与历史门禁的结构化迁移证据。"""
+
+    migration_type: ContractMigrationType
+    target: str
+    old_contract: str
+    current_contract: str
+    current_sources: tuple[str, ...]
+    migration_commit: str | None = None
+    current_consistent: bool = False
+    history_confirmed: bool = False
+    runtime_boundary_confirmed: bool = False
+    warning_source: str | None = None
+    lifecycle_gap: tuple[str, ...] = ()
+    conflict_reason: str | None = None
+
+    @property
+    def is_runtime_boundary(self) -> bool:
+        return self.migration_type in {
+            ContractMigrationType.ASYNC_MOCK_RESULT,
+            ContractMigrationType.ASYNC_GENERATOR_LIFECYCLE,
+        }
+
+    @property
+    def high_confidence(self) -> bool:
+        if self.conflict_reason or not self.current_consistent:
+            return False
+        if self.is_runtime_boundary:
+            return self.runtime_boundary_confirmed and bool(
+                self.warning_source
+            )
+        return (
+            self.history_confirmed
+            and self.migration_commit is not None
+            and len(set(self.current_sources)) >= 2
+        )
+
+
 @dataclass(frozen=True)
 class PytestIssue:
     """从 pytest hook 事件转换得到的一条稳定分诊记录。"""

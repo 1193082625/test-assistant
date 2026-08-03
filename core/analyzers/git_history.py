@@ -20,6 +20,24 @@ class GitSymbolHistory:
         return self.available and self.was_added and self.was_deleted
 
 
+@dataclass(frozen=True)
+class GitContractHistory:
+    """同一提交中删除旧契约并加入新契约的最小历史证据。"""
+
+    available: bool
+    old_expression: str
+    new_expression: str
+    migration_commit: str | None = None
+    old_expression_summary: str | None = None
+    new_expression_summary: str | None = None
+    commits: tuple[str, ...] = ()
+    degradation_reason: str | None = None
+
+    @property
+    def migration_confirmed(self) -> bool:
+        return self.available and self.migration_commit is not None
+
+
 def _safe_relative_path(value: str) -> str:
     path = PurePosixPath(value)
     if (
@@ -129,4 +147,107 @@ def read_symbol_history(
         was_deleted=was_deleted,
         deletion_commit=deletion_commit,
         commits=commits,
+    )
+
+
+def _safe_expression(value: str, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > 500
+        or "\x00" in value
+        or "\n" in value
+    ):
+        raise ValueError(f"Git {label}契约表达式不安全")
+    return value.strip()
+
+
+def read_contract_history(
+    *,
+    project_root: str | Path,
+    old_expression: str,
+    new_expression: str,
+    source_paths: tuple[str, ...],
+    timeout: float = 5,
+    output_limit: int = 50_000,
+) -> GitContractHistory:
+    """只读确认同一提交完成旧→新迁移；不根据提交信息推测意图。"""
+    old = _safe_expression(old_expression, "旧")
+    new = _safe_expression(new_expression, "新")
+    paths = tuple(_safe_relative_path(path) for path in source_paths)
+    if not paths:
+        raise ValueError("Git 证据 source_paths 不能为空")
+    root = Path(project_root).resolve()
+    commits: list[str] = []
+    try:
+        for expression in (old, new):
+            completed = _run_git(
+                root,
+                ["log", "--format=%H", "-S", expression, "--", *paths],
+                timeout=timeout,
+                output_limit=output_limit,
+            )
+            if completed.returncode != 0:
+                return GitContractHistory(
+                    available=False,
+                    old_expression=old,
+                    new_expression=new,
+                    degradation_reason="git_log_failed",
+                )
+            for line in completed.stdout.splitlines():
+                commit = line.strip()
+                if commit and commit not in commits:
+                    commits.append(commit)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return GitContractHistory(
+            available=False,
+            old_expression=old,
+            new_expression=new,
+            degradation_reason=type(error).__name__,
+        )
+    valid_commits = tuple(
+        commit for commit in commits[:50]
+        if len(commit) >= 7
+        and all(character in "0123456789abcdefABCDEF" for character in commit)
+    )
+    for commit in valid_commits:
+        try:
+            shown = _run_git(
+                root,
+                ["show", "--format=", "--unified=0", commit, "--", *paths],
+                timeout=timeout,
+                output_limit=output_limit,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if shown.returncode != 0 or "Binary files" in shown.stdout:
+            continue
+        removed_old = any(
+            line.startswith("-")
+            and not line.startswith("---")
+            and old in line
+            for line in shown.stdout.splitlines()
+        )
+        added_new = any(
+            line.startswith("+")
+            and not line.startswith("+++")
+            and new in line
+            for line in shown.stdout.splitlines()
+        )
+        if removed_old and added_new:
+            return GitContractHistory(
+                available=True,
+                old_expression=old,
+                new_expression=new,
+                migration_commit=commit,
+                old_expression_summary=old[:200],
+                new_expression_summary=new[:200],
+                commits=valid_commits,
+            )
+    return GitContractHistory(
+        available=True,
+        old_expression=old,
+        new_expression=new,
+        commits=valid_commits,
+        degradation_reason="migration_not_confirmed",
     )

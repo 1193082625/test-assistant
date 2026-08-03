@@ -15,6 +15,7 @@ from core.workflows import (
     build_dependency_digest,
     build_reproduction_command,
     collect_local_git_triage_evidence,
+    collect_contract_migration_triage_evidence,
     read_git_sha,
     triage_pytest_suite,
 )
@@ -110,7 +111,22 @@ def _render_result(result, record_path: Path) -> None:
                 f"- [{evidence.kind.value}] {evidence.description}"
             )
             for detail in evidence.details:
-                click.echo(f"  {detail}")
+                key, separator, value = detail.partition("=")
+                labels = {
+                    "migration_type": "迁移类型",
+                    "old_contract": "旧契约",
+                    "current_contract": "当前契约",
+                    "current_consistent": "当前一致性",
+                    "migration_commit": "migration_commit",
+                    "warning_source": "warning 来源",
+                    "lifecycle_gap": "生命周期缺口",
+                    "target": "目标",
+                    "current_source": "当前契约来源",
+                }
+                if separator and key in labels:
+                    click.echo(f"  {labels[key]}: {value}")
+                else:
+                    click.echo(f"  {detail}")
         click.echo(
             f"复现命令: {build_reproduction_command(command_target)}"
         )
@@ -216,11 +232,20 @@ def triage_command(
             )
             git_evidence = {}
             degradations = ()
+        contract_evidence, contract_degradations = (
+            collect_contract_migration_triage_evidence(
+                project_root=root,
+                suite=suite,
+                git_history_enabled=git_history_enabled,
+            )
+        )
+        degradations = (*degradations, *contract_degradations)
         result = triage_pytest_suite(
             suite=suite,
             executor=executor,
             root_causes=root_causes,
             evidence_by_root_cause=git_evidence,
+            evidence_by_node=contract_evidence,
         )
         commands = {
             cluster.fingerprint: build_reproduction_command(

@@ -1,5 +1,6 @@
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -242,3 +243,68 @@ def test_cli_inspect_triage_diagnose_report_preserves_project_state(
     assert {
         path: path.read_bytes() for path in protected_paths
     } == before
+
+
+def test_cli_triage_automatically_confirms_config_migration(tmp_path):
+    project = tmp_path / "migration-project"
+    (project / "app").mkdir(parents=True)
+    (project / "tests").mkdir()
+    (project / "app/__init__.py").write_text("", encoding="utf-8")
+    (project / "app/config.py").write_text(
+        "DEFAULT_PAGE_SIZE = 10\n", encoding="utf-8"
+    )
+    (project / "app/service.py").write_text(
+        (
+            "from app import config\n\n"
+            "class PaginationParams:\n"
+            "    page_size = config.DEFAULT_PAGE_SIZE\n"
+        ),
+        encoding="utf-8",
+    )
+    (project / "tests/test_pagination.py").write_text(
+        (
+            "from app.service import PaginationParams\n\n"
+            "def test_default_page_size():\n"
+            "    assert PaginationParams.page_size == 10\n"
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    subprocess.run(["git", "add", "."], cwd=project, check=True)
+    subprocess.run(
+        [
+            "git", "-c", "user.name=Test", "-c",
+            "user.email=test@example.com", "commit", "-q", "-m", "initial",
+        ],
+        cwd=project,
+        check=True,
+    )
+    (project / "app/config.py").write_text(
+        "DEFAULT_PAGE_SIZE = 20\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "app/config.py"], cwd=project, check=True)
+    subprocess.run(
+        [
+            "git", "-c", "user.name=Test", "-c",
+            "user.email=test@example.com", "commit", "-q", "-m", "migrate",
+        ],
+        cwd=project,
+        check=True,
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "triage", "--path", str(project),
+            "--test-path", "tests/test_pagination.py",
+            "--allow-git-history",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "test_defect" in result.output
+    assert "置信度: high" in result.output
+    assert "迁移类型: config_default" in result.output
+    assert "旧契约: 10" in result.output
+    assert "当前契约: 20" in result.output
+    assert "migration_commit:" in result.output
