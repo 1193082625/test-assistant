@@ -191,6 +191,50 @@ def test_triage_test_path_reports_cluster_and_evidence(tmp_path):
     assert "代表 node: tests/test_demo.py::test_bad" in result.output
     assert "证据:" in result.output
     assert "复现命令: python -m pytest" in result.output
+    assert "[1/4] 正在执行 pytest 套件" in result.output
+    assert "范围: tests/test_demo.py" in result.output
+    assert "[2/4] 正在聚类失败" in result.output
+    assert "[3/4] 正在复跑代表节点" in result.output
+    assert "[4/4] 正在保存诊断" in result.output
+    assert "pytest 执行完成，正在分析结构化结果" in result.output
+
+
+def test_triage_accepts_custom_suite_timeout(tmp_path, monkeypatch):
+    _write_project(tmp_path, "def test_ok():\n    assert True\n")
+    observed = {}
+
+    def fake_execute_suite(
+        self,
+        test_path=None,
+        timeout=120,
+        max_failures=None,
+        progress_callback=None,
+    ):
+        observed["timeout"] = timeout
+        if progress_callback is not None:
+            progress_callback({"event": "collection", "total": 1})
+            progress_callback({
+                "event": "test_complete",
+                "completed": 1,
+                "node_id": "tests/test_demo.py::test_ok",
+                "outcome": "passed",
+            })
+        return PytestSuiteResult(report=ExecutionReport(exit_code=0))
+
+    monkeypatch.setattr(
+        triage_module.PytestExecutor,
+        "execute_suite",
+        fake_execute_suite,
+    )
+    result = CliRunner().invoke(
+        cli,
+        ["triage", "--path", str(tmp_path), "--timeout", "300"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert observed["timeout"] == 300
+    assert "超时: 300 秒" in result.output
+    assert "进度: 1 / 1（100%）" in result.output
 
 
 def test_triage_exact_node_only_runs_selected_test(tmp_path):
@@ -225,7 +269,13 @@ def test_triage_passes_structured_max_failures_to_executor(
     _write_project(tmp_path, "def test_ok():\n    assert True\n")
     observed = {}
 
-    def fake_execute_suite(self, test_path=None, timeout=120, max_failures=None):
+    def fake_execute_suite(
+        self,
+        test_path=None,
+        timeout=120,
+        max_failures=None,
+        progress_callback=None,
+    ):
         observed["test_path"] = test_path
         observed["max_failures"] = max_failures
         return PytestSuiteResult(report=ExecutionReport(exit_code=0))
@@ -306,7 +356,13 @@ def test_triage_runner_error_uses_exit_code_two(tmp_path, monkeypatch):
         exception_type="FileNotFoundError",
     )
 
-    def fake_execute_suite(self, test_path=None, timeout=120, max_failures=None):
+    def fake_execute_suite(
+        self,
+        test_path=None,
+        timeout=120,
+        max_failures=None,
+        progress_callback=None,
+    ):
         return PytestSuiteResult(
             report=ExecutionReport(
                 exit_code=None,

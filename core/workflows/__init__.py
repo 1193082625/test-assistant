@@ -8,6 +8,7 @@ from .verification import (
 )
 from .triage import (
     collect_contract_migration_triage_evidence,
+    build_contract_migration_root_causes,
     collect_local_git_triage_evidence,
     TriageEvidence,
     triage_pytest_suite,
@@ -24,6 +25,7 @@ __all__ = [
     "TriageEvidence",
     "collect_local_git_triage_evidence",
     "collect_contract_migration_triage_evidence",
+    "build_contract_migration_root_causes",
     "TriageResult",
     "triage_pytest_suite",
 ]

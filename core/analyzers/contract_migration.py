@@ -27,6 +27,7 @@ class ContractMismatch:
     actual: object | None
     source_path: str
     test_path: str
+    actual_type: str | None = None
     dependencies: tuple[str, ...] = ()
     warning_source: str | None = None
     missing_lifecycle_steps: tuple[str, ...] = ()
@@ -107,7 +108,11 @@ def _validation_mismatch(
     target = field_match.group(1)
     raw_value = input_match.group(1).strip() if input_match else None
     input_type = input_match.group(2) if input_match else None
-    if "string_pattern_mismatch" in message or "String should match pattern" in message:
+    if (
+        "string_pattern_mismatch" in message
+        or "String should match pattern" in message
+        or "literal_error" in message
+    ):
         kind = ContractMismatchKind.ENUM
     elif input_type == "MagicMock" or "input_type=MagicMock" in message:
         kind = ContractMismatchKind.OPTIONAL_FIELD
@@ -120,6 +125,7 @@ def _validation_mismatch(
         target=target,
         expected=expected,
         actual=raw_value,
+        actual_type=input_type,
         source_path=source_path,
         test_path=test_path,
     )
@@ -132,10 +138,19 @@ def _async_mismatches(
     source_path: str,
     test_path: str,
 ) -> list[ContractMismatch]:
-    if "was never awaited" not in message:
+    unraisable_runtime_object = (
+        "PytestUnraisableExceptionWarning" in message
+        and ("<coroutine object" in message or "<async_generator object" in message)
+    )
+    if "was never awaited" not in message and not unraisable_runtime_object:
         return []
     results: list[ContractMismatch] = []
     warning_match = re.search(r"coroutine(?: method)? ['\"]?([^'\"\n]+)", message)
+    if warning_match is None:
+        warning_match = re.search(
+            r"<(?:coroutine|async_generator) object ([A-Za-z_][\w.]*) at",
+            message,
+        )
     warning_source = warning_match.group(1).strip() if warning_match else None
     async_mock_names = {
         node.targets[0].id
@@ -183,6 +198,19 @@ def _async_mismatches(
                 test_path=test_path,
                 warning_source=warning_source,
             ))
+    if not any(
+        item.kind is ContractMismatchKind.ASYNC_MOCK_RESULT
+        for item in results
+    ) and async_mock_names and "AsyncMock" in message:
+        results.append(ContractMismatch(
+            kind=ContractMismatchKind.ASYNC_MOCK_RESULT,
+            target=sorted(async_mock_names)[0],
+            expected="configured synchronous result object",
+            actual="implicit AsyncMock child",
+            source_path=source_path,
+            test_path=test_path,
+            warning_source=warning_source,
+        ))
     generator_names: set[str] = set()
     awaited_next: set[str] = set()
     closed: set[str] = set()

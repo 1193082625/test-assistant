@@ -272,6 +272,7 @@ test-assistant triage --path . --test-path tests/test_service.py
 test-assistant triage --path . \
   --test-node tests/test_service.py::test_case
 test-assistant triage --path . --max-failures 10
+test-assistant triage --path . --timeout 300
 test-assistant triage --path . --test-path tests/test_service.py \
   --allow-git-history
 ```
@@ -283,6 +284,8 @@ test-assistant triage --path . --test-path tests/test_service.py \
 - `2`：参数、Runner、环境或持久化错误。
 
 运行记录保存在 `.autotest/triage/<run-id>.json` 和 `latest.json`。失败诊断继续保存在 `.autotest/diagnoses/`，可使用 `diagnose` 与 `report` 查看。
+
+`triage` 使用四阶段进度展示 pytest 执行、失败聚类、代表节点复跑和诊断保存。完整套件较慢时会显示已运行时间、已完成数量和百分比；`--timeout` 可以覆盖默认的 120 秒套件超时。
 
 #### 本地 Git 历史授权
 

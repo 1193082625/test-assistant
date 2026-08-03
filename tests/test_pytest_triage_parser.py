@@ -165,3 +165,33 @@ def test_execute_suite_limits_process_output(monkeypatch, tmp_path):
     assert len(result.report.stdout) < 21_000
     assert "omitted 5000 characters" in result.report.stdout
     assert len(result.report.stderr) < 21_000
+
+
+def test_execute_suite_emits_exact_incremental_progress(tmp_path):
+    _write(tmp_path / "test_progress.py", """
+import pytest
+
+def test_first():
+    assert True
+
+@pytest.mark.skip(reason="later")
+def test_second():
+    pass
+
+def test_third():
+    assert True
+""")
+    events = []
+
+    result = PytestExecutor(cwd=str(tmp_path)).execute_suite(
+        progress_callback=events.append,
+    )
+
+    assert result.report.exit_code == 0
+    collection = next(event for event in events if event["event"] == "collection")
+    assert collection["total"] == 3
+    completions = [
+        event for event in events if event["event"] == "test_complete"
+    ]
+    assert [event["completed"] for event in completions] == [1, 2, 3]
+    assert completions[-1]["node_id"].endswith("::test_third")

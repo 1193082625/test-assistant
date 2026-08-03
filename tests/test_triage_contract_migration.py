@@ -7,7 +7,11 @@ from core.models import (
     PytestIssue,
     TriagePhase,
 )
-from core.workflows.triage import TriageEvidence, triage_pytest_suite
+from core.workflows.triage import (
+    TriageEvidence,
+    collect_contract_migration_triage_evidence,
+    triage_pytest_suite,
+)
 
 
 class StableFailingExecutor:
@@ -109,3 +113,20 @@ def test_async_generator_recommends_complete_lifecycle():
     ))
     assert diagnosis.category is DiagnosisCategory.TEST_DEFECT
     assert "await anext" in diagnosis.suggested_actions[0].description
+
+
+def test_green_suite_skips_project_source_scan(tmp_path, monkeypatch):
+    def fail_scan(root):
+        raise AssertionError("green suite must not scan project sources")
+
+    monkeypatch.setattr(
+        "core.workflows.triage._project_python_sources",
+        fail_scan,
+    )
+    evidence, degradations = collect_contract_migration_triage_evidence(
+        project_root=tmp_path,
+        suite=PytestSuiteResult(report=ExecutionReport(exit_code=0)),
+        git_history_enabled=True,
+    )
+    assert evidence == {}
+    assert degradations == ()

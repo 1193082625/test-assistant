@@ -1,6 +1,8 @@
 """运行并确定性分诊目标项目已有的 pytest 测试套件。"""
 
 from pathlib import Path
+import sys
+import time
 
 import click
 
@@ -16,9 +18,88 @@ from core.workflows import (
     build_reproduction_command,
     collect_local_git_triage_evidence,
     collect_contract_migration_triage_evidence,
+    build_contract_migration_root_causes,
     read_git_sha,
     triage_pytest_suite,
 )
+
+
+class _TriageProgress:
+    """将结构化进度事件渲染为稳定的四阶段 CLI 输出。"""
+
+    def __init__(self, *, scope: str, timeout: float) -> None:
+        self.scope = scope
+        self.timeout = timeout
+        self.started = time.monotonic()
+        self.total = 0
+        self.completed = 0
+        self.interactive = bool(getattr(sys.stdout, "isatty", lambda: False)())
+        self._line_open = False
+        self._rerun_started = False
+
+    @staticmethod
+    def _duration(seconds: float) -> str:
+        whole = max(0, int(seconds))
+        return f"{whole // 60:02d}:{whole % 60:02d}"
+
+    def start(self) -> None:
+        click.echo("\n[1/4] 正在执行 pytest 套件")
+        click.echo(f"      范围: {self.scope}")
+        click.echo(f"      超时: {self.timeout:g} 秒")
+
+    def pytest_event(self, event: dict[str, object]) -> None:
+        if event.get("event") == "collection":
+            self.total = int(event.get("total") or 0)
+            self._draw(force=True)
+        elif event.get("event") == "test_complete":
+            self.completed = int(event.get("completed") or 0)
+            self._draw(force=self.completed == self.total)
+
+    def _draw(self, *, force: bool) -> None:
+        elapsed = self._duration(time.monotonic() - self.started)
+        percent = (
+            int(self.completed * 100 / self.total) if self.total else 0
+        )
+        message = (
+            f"      已运行: {elapsed}  "
+            f"进度: {self.completed} / {self.total}（{percent}%）"
+        )
+        if self.interactive:
+            click.echo(f"\r\033[2K{message}", nl=False)
+            self._line_open = True
+        elif force or self.completed in {0, self.total}:
+            click.echo(message)
+
+    def finish_suite(self) -> None:
+        if self._line_open:
+            click.echo()
+            self._line_open = False
+        click.echo("      pytest 执行完成，正在分析结构化结果...")
+
+    def workflow_event(self, event: dict[str, object]) -> None:
+        kind = event.get("event")
+        if kind == "clusters":
+            click.echo("\n[2/4] 正在聚类失败")
+            click.echo(
+                "      发现: "
+                f"{event.get('failure_count', 0)} 个失败节点 → "
+                f"{event.get('cluster_count', 0)} 个根因簇"
+            )
+        elif kind == "rerun":
+            if not self._rerun_started:
+                click.echo("\n[3/4] 正在复跑代表节点")
+                self._rerun_started = True
+            click.echo(
+                f"      进度: {event.get('index')} / {event.get('total')}"
+            )
+            click.echo(f"      当前: {event.get('node_id')}")
+
+    def start_save(self, *, has_clusters: bool) -> None:
+        if not self._rerun_started:
+            click.echo("\n[3/4] 无需复跑代表节点")
+            if not has_clusters:
+                click.echo("      当前套件没有失败簇")
+        click.echo("\n[4/4] 正在保存诊断")
 
 
 def _exit_error(message: str) -> None:
@@ -191,6 +272,13 @@ def _render_git_boundary(enabled: bool) -> None:
     is_flag=True,
     help="本次运行不读取 Git 历史（覆盖已保存授权）",
 )
+@click.option(
+    "--timeout",
+    type=click.FloatRange(min=1),
+    default=120.0,
+    show_default=True,
+    help="pytest 套件执行超时秒数",
+)
 def triage_command(
     project_path: Path,
     test_path: str | None,
@@ -198,6 +286,7 @@ def triage_command(
     max_failures: int | None,
     allow_git_history: bool,
     no_git_history: bool,
+    timeout: float,
 ) -> None:
     """运行已有 pytest 套件，聚类、复跑并保存确定性诊断。"""
     root = project_path.resolve()
@@ -214,10 +303,18 @@ def triage_command(
             no_git_history=no_git_history,
         )
         _render_git_boundary(git_history_enabled)
+        progress = _TriageProgress(
+            scope=scope or "tests/",
+            timeout=timeout,
+        )
+        progress.start()
         suite = executor.execute_suite(
             scope,
+            timeout=timeout,
             max_failures=max_failures,
+            progress_callback=progress.pytest_event,
         )
+        progress.finish_suite()
         if git_history_enabled:
             root_causes, git_evidence, degradations = (
                 collect_local_git_triage_evidence(
@@ -239,6 +336,9 @@ def triage_command(
                 git_history_enabled=git_history_enabled,
             )
         )
+        root_causes.update(
+            build_contract_migration_root_causes(contract_evidence)
+        )
         degradations = (*degradations, *contract_degradations)
         result = triage_pytest_suite(
             suite=suite,
@@ -246,6 +346,7 @@ def triage_command(
             root_causes=root_causes,
             evidence_by_root_cause=git_evidence,
             evidence_by_node=contract_evidence,
+            progress_callback=progress.workflow_event,
         )
         commands = {
             cluster.fingerprint: build_reproduction_command(
@@ -255,6 +356,7 @@ def triage_command(
         }
         if not commands:
             commands["suite"] = build_reproduction_command(scope or ".")
+        progress.start_save(has_clusters=bool(result.clusters))
         references = _save_diagnoses(
             root=root,
             result=result,

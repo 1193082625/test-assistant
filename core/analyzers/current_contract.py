@@ -82,12 +82,20 @@ def analyze_config_contract(
     values, references = _assignments(parsed)
     short_target = target.rsplit(".", 1)[-1]
     refs = references.get(short_target, [])
+    has_consumer_reference = bool(refs)
     candidates: list[tuple[object, str]] = []
     used_paths: set[str] = set()
     for reference, consumer_path in refs:
         referenced_name = reference.rsplit(".", 1)[-1]
         candidates.extend(values.get(referenced_name, []))
         used_paths.add(consumer_path)
+    for consumer, consumer_refs in references.items():
+        for reference, consumer_path in consumer_refs:
+            if reference.rsplit(".", 1)[-1] != short_target:
+                continue
+            candidates.extend(values.get(short_target, []))
+            used_paths.add(consumer_path)
+            has_consumer_reference = True
     candidates.extend(values.get(short_target, []))
     distinct = {repr(value): value for value, _ in candidates}
     paths = used_paths | {path for _, path in candidates}
@@ -99,7 +107,7 @@ def analyze_config_contract(
             sources=tuple(sorted(paths)),
             conflict_reason="multiple_current_values",
         )
-    if len(distinct) == 1 and refs and len(paths) >= 2:
+    if len(distinct) == 1 and has_consumer_reference and len(paths) >= 2:
         return CurrentContractEvidence(
             target=target,
             status=ContractEvidenceStatus.CONFIRMED,

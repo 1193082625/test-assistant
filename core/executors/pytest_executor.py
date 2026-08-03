@@ -5,7 +5,9 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
+from typing import Callable
 
 from core.executors.base import (
     BaseExecutor,
@@ -96,6 +98,7 @@ class PytestExecutor(BaseExecutor):
         test_path: str | None = None,
         timeout: float = 120,
         max_failures: int | None = None,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> PytestSuiteResult:
         """执行 pytest 套件，并通过 hook JSON 返回结构化事件。"""
         if (
@@ -117,6 +120,7 @@ class PytestExecutor(BaseExecutor):
             prefix="test-assistant-pytest-"
         ) as temporary_directory:
             event_path = Path(temporary_directory) / "events.json"
+            progress_path = Path(temporary_directory) / "progress.jsonl"
             command = [sys.executable, "-m", "pytest"]
             if test_path is not None:
                 command.append(test_path)
@@ -129,15 +133,25 @@ class PytestExecutor(BaseExecutor):
                 "core.executors.pytest_capture_plugin",
                 "--test-assistant-json",
                 str(event_path),
+                "--test-assistant-progress-jsonl",
+                str(progress_path),
             ])
             try:
-                result = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    cwd=self.cwd,
-                )
+                if progress_callback is None:
+                    result = subprocess.run(
+                        command,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        cwd=self.cwd,
+                    )
+                else:
+                    result = self._run_with_progress(
+                        command=command,
+                        timeout=timeout,
+                        progress_path=progress_path,
+                        progress_callback=progress_callback,
+                    )
             except subprocess.TimeoutExpired as error:
                 report = ExecutionReport(
                     stdout=summarize_process_output(error.stdout),
@@ -213,6 +227,78 @@ class PytestExecutor(BaseExecutor):
                 environment=environment,
             )
             return PytestSuiteResult(report=report, issues=issues)
+
+    def _run_with_progress(
+        self,
+        *,
+        command: list[str],
+        timeout: float,
+        progress_path: Path,
+        progress_callback: Callable[[dict[str, object]], None],
+    ) -> subprocess.CompletedProcess[str]:
+        """捕获最终输出，同时读取插件追加的增量 JSONL 事件。"""
+        started = time.monotonic()
+        offset = 0
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stdout:
+            with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr:
+                process = subprocess.Popen(
+                    command,
+                    cwd=self.cwd,
+                    stdout=stdout,
+                    stderr=stderr,
+                    text=True,
+                )
+                try:
+                    while process.poll() is None:
+                        if time.monotonic() - started > timeout:
+                            process.kill()
+                            process.wait()
+                            raise subprocess.TimeoutExpired(
+                                command, timeout
+                            )
+                        offset = self._emit_progress_events(
+                            progress_path,
+                            offset,
+                            progress_callback,
+                        )
+                        time.sleep(0.1)
+                    offset = self._emit_progress_events(
+                        progress_path,
+                        offset,
+                        progress_callback,
+                    )
+                except BaseException:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+                    raise
+                stdout.seek(0)
+                stderr.seek(0)
+                return subprocess.CompletedProcess(
+                    command,
+                    process.returncode,
+                    stdout.read(),
+                    stderr.read(),
+                )
+
+    @staticmethod
+    def _emit_progress_events(
+        path: Path,
+        offset: int,
+        callback: Callable[[dict[str, object]], None],
+    ) -> int:
+        if not path.exists():
+            return offset
+        with path.open("r", encoding="utf-8") as stream:
+            stream.seek(offset)
+            for line in stream:
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    callback(payload)
+            return stream.tell()
 
     @staticmethod
     def _error_type(returncode: int) -> str | None:

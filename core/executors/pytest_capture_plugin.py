@@ -8,6 +8,7 @@ import pytest
 
 
 _events: list[dict[str, Any]] = []
+_completed_nodes: set[str] = set()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -16,10 +17,32 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store",
         help="write structured pytest events to this JSON file",
     )
+    parser.getgroup("test-assistant").addoption(
+        "--test-assistant-progress-jsonl",
+        action="store",
+        help="append incremental pytest progress events as JSONL",
+    )
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     _events.clear()
+    _completed_nodes.clear()
+
+
+def _progress(config: pytest.Config, payload: dict[str, object]) -> None:
+    output_path = config.getoption("--test-assistant-progress-jsonl")
+    if not output_path:
+        return
+    with Path(output_path).open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        stream.flush()
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    _progress(session.config, {
+        "event": "collection",
+        "total": len(session.items),
+    })
 
 
 def _location(location: object) -> list[dict[str, object]]:
@@ -69,6 +92,19 @@ def pytest_runtest_makereport(
         "locations": _location(report.location),
         "duration": report.duration,
     })
+    terminal_report = (
+        report.when == "call"
+        or (report.when == "setup" and report.skipped)
+        or (report.when in {"setup", "teardown"} and report.failed)
+    )
+    if terminal_report and report.nodeid not in _completed_nodes:
+        _completed_nodes.add(report.nodeid)
+        _progress(item.config, {
+            "event": "test_complete",
+            "completed": len(_completed_nodes),
+            "node_id": report.nodeid,
+            "outcome": status,
+        })
 
 
 def pytest_collectreport(report: pytest.CollectReport) -> None:

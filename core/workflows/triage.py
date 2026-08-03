@@ -1,9 +1,10 @@
 """已有 pytest 套件的确定性分组、复跑和归因工作流。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import ast
 from pathlib import Path
 import re
-from typing import Mapping, Protocol
+from typing import Callable, Mapping, Protocol
 from uuid import uuid4
 
 from core.diagnosticians import (
@@ -325,6 +326,7 @@ def triage_pytest_suite(
     root_causes: Mapping[str, FailureRootCause] | None = None,
     evidence_by_root_cause: Mapping[str, TriageEvidence] | None = None,
     run_id: str | None = None,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> TriageResult:
     """按固定优先级为每个失败簇生成一条确定性诊断。"""
     evidence_by_node = evidence_by_node or {}
@@ -332,6 +334,15 @@ def triage_pytest_suite(
     clusters = cluster_pytest_issues(
         suite.issues, dict(root_causes or {})
     )
+    if progress_callback is not None:
+        progress_callback({
+            "event": "clusters",
+            "failure_count": len({
+                issue.node_id for issue in suite.issues
+                if issue.node_id and issue.outcome in {"failed", "error"}
+            }),
+            "cluster_count": len(clusters),
+        })
     diagnoses: list[Diagnosis] = []
 
     preflight = diagnose_execution_preflight(
@@ -352,6 +363,15 @@ def triage_pytest_suite(
             diagnoses=(preflight,),
         )
 
+    rerun_total = sum(
+        1 for cluster in clusters
+        if cluster.representative_node is not None
+        and not any(
+            issue.phase is TriagePhase.COLLECTION
+            for issue in cluster.issues
+        )
+    )
+    rerun_index = 0
     for cluster in clusters:
         if any(
             issue.phase is TriagePhase.COLLECTION
@@ -373,6 +393,15 @@ def triage_pytest_suite(
         if node is None:
             diagnoses.append(_inconclusive_diagnosis(cluster, ()))
             continue
+
+        rerun_index += 1
+        if progress_callback is not None:
+            progress_callback({
+                "event": "rerun",
+                "index": rerun_index,
+                "total": rerun_total,
+                "node_id": node,
+            })
 
         reports = repeat_test_execution(
             executor=executor,
@@ -455,20 +484,29 @@ def collect_local_git_triage_evidence(
 def _project_python_sources(root: Path) -> dict[str, str]:
     """读取有限的项目内 Python 源码；排除测试、缓存和工具产物。"""
     sources: dict[str, str] = {}
-    for path in sorted(root.rglob("*.py")):
-        relative = path.relative_to(root)
-        if any(part in {
-            ".git", ".autotest", ".venv", "venv", "__pycache__", "tests"
-        } for part in relative.parts):
-            continue
-        if len(sources) >= 500:
-            break
-        try:
-            if path.stat().st_size > 250_000:
+    excluded = {
+        ".git", ".autotest", ".venv", "venv", "__pycache__", "tests",
+        "node_modules", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    }
+    for directory, directory_names, file_names in root.walk():
+        directory_names[:] = sorted(
+            name for name in directory_names if name not in excluded
+        )
+        for name in sorted(file_names):
+            if not name.endswith(".py"):
                 continue
-            sources[relative.as_posix()] = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError):
-            continue
+            path = directory / name
+            relative = path.relative_to(root)
+            if len(sources) >= 500:
+                return sources
+            try:
+                if path.stat().st_size > 250_000:
+                    continue
+                sources[relative.as_posix()] = path.read_text(
+                    encoding="utf-8"
+                )
+            except (OSError, UnicodeError):
+                continue
     return sources
 
 
@@ -485,6 +523,42 @@ def _actual_from_failure(message: str) -> str | None:
     return None
 
 
+def _source_for_test_node(test_source: str, node_id: str) -> str:
+    """限制分析到实际失败测试函数，同时保留模块级 fixture。"""
+    test_name = node_id.rsplit("::", 1)[-1].split("[")[0]
+    try:
+        tree = ast.parse(test_source)
+    except SyntaxError:
+        return test_source
+    selected = next(
+        (
+            node for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == test_name
+        ),
+        None,
+    )
+    if selected is None:
+        return test_source
+    fixtures = [
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(
+            (
+                getattr(decorator, "id", "") == "fixture"
+                or getattr(getattr(decorator, "func", None), "attr", "") == "fixture"
+                or getattr(decorator, "attr", "") == "fixture"
+            )
+            for decorator in node.decorator_list
+        )
+    ]
+    segments = [
+        ast.get_source_segment(test_source, node)
+        for node in (*fixtures, selected)
+    ]
+    return "\n\n".join(segment for segment in segments if segment)
+
+
 def collect_contract_migration_triage_evidence(
     *,
     project_root: str | Path,
@@ -492,11 +566,18 @@ def collect_contract_migration_triage_evidence(
     git_history_enabled: bool,
 ) -> tuple[dict[str, TriageEvidence], tuple[str, ...]]:
     """从失败 node 自动闭合测试、当前源码与可选 Git 迁移证据。"""
+    relevant_issues = tuple(
+        issue for issue in suite.issues
+        if issue.node_id
+        and issue.outcome in {"failed", "error", "warning"}
+    )
+    if not relevant_issues:
+        return {}, ()
     root = Path(project_root).resolve()
     source_files = _project_python_sources(root)
     evidence_by_node: dict[str, TriageEvidence] = {}
     degradations: list[str] = []
-    for issue in suite.issues:
+    for issue in relevant_issues:
         if not issue.node_id or issue.node_id in evidence_by_node:
             continue
         test_path_text = issue.node_id.partition("::")[0]
@@ -507,7 +588,7 @@ def collect_contract_migration_triage_evidence(
         except (ValueError, OSError, UnicodeError):
             continue
         mismatches = extract_contract_mismatches(
-            test_source=test_source,
+            test_source=_source_for_test_node(test_source, issue.node_id),
             failure_message=issue.message,
             source_path="<project-source>",
             test_path=test_path_text,
@@ -592,17 +673,37 @@ def collect_contract_migration_triage_evidence(
                 current_value = actual
             history_confirmed = False
             migration_commit = None
+            old_contract: object | None = mismatch.expected
+            history_old: object | None = mismatch.expected
+            history_new: object | None = current_value
+            if mismatch.kind in {
+                ContractMismatchKind.TYPE,
+                ContractMismatchKind.OPTIONAL_FIELD,
+            } and mismatch.actual_type:
+                old_contract = mismatch.actual_type
+                history_old = mismatch.actual_type
+            elif mismatch.kind is ContractMismatchKind.ENUM:
+                old_contract = mismatch.actual
+                history_old = str(mismatch.actual or "").strip("'\"")
+                if isinstance(current_value, tuple):
+                    history_new = next(
+                        (
+                            value for value in current_value
+                            if value != "auto"
+                        ),
+                        current_value[0] if current_value else None,
+                    )
             if (
                 git_history_enabled
                 and not runtime_confirmed
-                and mismatch.expected is not None
-                and current_value is not None
+                and history_old is not None
+                and history_new is not None
                 and current_sources
             ):
                 history = read_contract_history(
                     project_root=root,
-                    old_expression=str(mismatch.expected),
-                    new_expression=str(current_value),
+                    old_expression=str(history_old),
+                    new_expression=str(history_new),
                     source_paths=current_sources,
                 )
                 history_confirmed = history.migration_confirmed
@@ -614,7 +715,7 @@ def collect_contract_migration_triage_evidence(
             contract = ContractMigrationEvidence(
                 migration_type=migration_type,
                 target=mismatch.target,
-                old_contract=str(mismatch.expected),
+                old_contract=str(old_contract),
                 current_contract=str(current_value),
                 current_sources=current_sources,
                 migration_commit=migration_commit,
@@ -636,4 +737,59 @@ def collect_contract_migration_triage_evidence(
                 contract_migration=contract
             )
             break
+    related_groups: dict[tuple[object, ...], list[str]] = {}
+    for node_id, evidence in evidence_by_node.items():
+        migration = evidence.contract_migration
+        if (
+            migration is not None
+            and migration.migration_type is ContractMigrationType.CONFIG_DEFAULT
+            and migration.migration_commit
+        ):
+            key = (
+                migration.migration_commit,
+                tuple(sorted(migration.current_sources)),
+            )
+            related_groups.setdefault(key, []).append(node_id)
+    for node_ids in related_groups.values():
+        if len(node_ids) < 2:
+            continue
+        for node_id in node_ids:
+            evidence = evidence_by_node[node_id]
+            migration = evidence.contract_migration
+            if migration is not None:
+                evidence_by_node[node_id] = replace(
+                    evidence,
+                    contract_migration=replace(
+                        migration,
+                        migration_type=ContractMigrationType.RELATED_CONFIG,
+                    ),
+                )
     return evidence_by_node, tuple(degradations)
+
+
+def build_contract_migration_root_causes(
+    evidence_by_node: Mapping[str, TriageEvidence],
+) -> dict[str, FailureRootCause]:
+    """为同组关联配置迁移生成稳定根因键，供聚类合并。"""
+    causes: dict[str, FailureRootCause] = {}
+    for node_id, evidence in evidence_by_node.items():
+        migration = evidence.contract_migration
+        if (
+            migration is None
+            or migration.migration_type is not ContractMigrationType.RELATED_CONFIG
+            or not migration.migration_commit
+        ):
+            continue
+        source_key = "|".join(sorted(migration.current_sources))
+        key = f"related_config:{migration.migration_commit}:{source_key}"
+        causes[node_id] = FailureRootCause(
+            key=key,
+            kind="related_config_migration",
+            target=source_key,
+            symbol=migration.target,
+            source_path=(
+                migration.current_sources[0]
+                if migration.current_sources else "<project-source>"
+            ),
+        )
+    return causes

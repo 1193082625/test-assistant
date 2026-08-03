@@ -199,6 +199,7 @@ tests/test_git_contract_history.py     同一提交旧→新契约迁移证据
 tests/test_contract_migration_analyzer.py 失败契约、warning 与生命周期提取
 tests/test_current_contract.py         当前静态契约一致性与冲突降级
 tests/test_triage_contract_migration.py 契约迁移高置信度决策表
+tests/test_v052_release_acceptance.py  八类真实 CLI 黑盒归因、权限降级与生产反例
 tests/test_failure_root_causes.py      AST 共同根因提取与聚类
 tests/test_triage_git_attribution.py   删除历史自动归因
 tests/test_candidate_workflow.py       候选 workflow
