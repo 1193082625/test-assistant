@@ -210,7 +210,13 @@ tests/test_diagnosis_repository.py     持久化与脱敏报告
 
 实现计划与历史决策参见：
 
+- `docs/plans/2026-08-04-version-roadmap-v0.6-v1.0.md`
 - `docs/plans/2026-07-27-python-cli-trusted-loop-roadmap.md`
 - `docs/plans/2026-08-01-end-to-end-cli-workflow.md`
 - `docs/plans/2026-08-03-contract-migration-triage-v0.5.2.md`
 - `docs/plans/2026-08-03-coverage-and-code-quality-v0.6.0.md`
+- `docs/plans/2026-08-04-compatibility-and-doctor-v0.6.x.md`
+- `docs/plans/2026-08-04-scale-and-data-lifecycle-v0.7.0.md`
+- `docs/plans/2026-08-04-secure-release-v1.0.0.md`
+
+其中 `2026-08-04-version-roadmap-v0.6-v1.0.md` 是当前权威版本入口；更早文件保留实施历史和架构背景。

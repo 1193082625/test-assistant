@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.13、pytest、pytest-cov/coverage.py、Ruff JSON、mypy JSON 或稳定文本适配器、AST、Click、版本化 JSON。
 
+> 路线图关系：本计划是 `docs/plans/2026-08-04-version-roadmap-v0.6-v1.0.md` 的 v0.6.0 实施计划。除 coverage/Ruff/mypy 外，v0.6.0 还承担版本可见性、pytest 子进程中断清理和 wheel 自动消费 smoke；兼容矩阵、性能/数据生命周期和安全发布分别留给 v0.6.x、v0.7.0 和 v1.0.0。
+
 ---
 
 ## 产品边界与命令形态
@@ -180,7 +182,24 @@ test-assistant audit --path . --changed-only
 5. 运行 `poetry run pytest tests/test_audit_report.py tests/test_cli_plan.py -q`。
 6. 提交：`feat: connect audit findings to reviewed test plans`。
 
-### Task 10: v0.6.0 真实项目验收与发布
+### Task 10: CLI 版本、信号中断与 wheel 自动 smoke
+
+**Files:**
+- Modify: `cli/main.py`
+- Modify: `core/executors/pytest_executor.py`
+- Modify: `.github/workflows/ci.yml`
+- Test: `tests/test_cli_main.py`
+- Test: `tests/test_pytest_interrupt.py`
+- Test: `tests/test_installed_cli_smoke.py`
+
+**Steps:**
+1. 先写失败测试，要求 `test-assistant --version` 输出安装包版本。
+2. 用真实子进程覆盖 Ctrl-C/终止、pytest 子进程退出、临时结果清理和旧 `latest.json` 保持有效。
+3. 超时和用户中断必须终止整个受控进程组，并返回不同的结构化状态。
+4. CI 构建 wheel 后创建干净 Python 3.13 环境，只安装 wheel 并运行 `--version`、`audit --help` 和最小 fixture smoke。
+5. 运行目标测试并提交：`test: automate installed cli and interrupt smoke`。
+
+### Task 11: v0.6.0 真实项目验收与发布
 
 **Files:**
 - Modify: `README.md`
@@ -198,7 +217,8 @@ test-assistant audit --path . --changed-only
 6. 验证 audit 前后产品源码、测试、snapshot 和 Git 状态不变。
 7. 运行 `poetry run pytest -q`、`poetry build`、`git diff --check`。
 8. 在干净 Python 3.13 环境安装 wheel 并完成 CLI smoke。
-9. 提交：`release: prepare test-assistant v0.6.0`。
+9. 确认 `--version`、Ctrl-C 清理和 CI wheel 消费 smoke 均通过。
+10. 提交：`release: prepare test-assistant v0.6.0`。
 
 ## v0.6.0 完成标准
 
@@ -207,4 +227,5 @@ test-assistant audit --path . --changed-only
 - 没有显式阈值时只报告，不制造失败；有阈值时退出码稳定可用于 CI。
 - audit 不自动修复、不联网、不修改 Git，并能在部分工具缺失时产出其余可信结果。
 - 未覆盖符号可进入人工审批的 TestSpec 流程，但不能绕过现有候选门禁。
-
+- 用户可确认实际安装版本；中断不会遗留 pytest 子进程或损坏正式记录。
+- CI 验证的是构建后的 wheel，而不仅是源码工作区。

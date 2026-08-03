@@ -136,6 +136,14 @@ python -m pip install \
   /absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
 ```
 
+强制重装
+```bash
+ python -m pip install \
+  --force-reinstall \
+  --no-deps \
+  /absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
+```
+
 验证：
 
 ```bash

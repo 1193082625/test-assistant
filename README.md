@@ -245,11 +245,15 @@ poetry run test-assistant triage --path /path/to/demo-project \
 - [完整用户指南](docs/user-guide.md)：参数解释、完整操作、退出码和排错；
 - [项目结构](docs/project-structure.md)：模块职责、依赖方向、数据流和系统不变量；
 - [可信 CLI 路线图](docs/plans/2026-07-27-python-cli-trusted-loop-roadmap.md)：范围、里程碑和后续方向；
+- [v0.6～v1.0 统一版本路线图](docs/plans/2026-08-04-version-roadmap-v0.6-v1.0.md)：当前权威版本边界、统一发布门和计划索引；
 - [端到端 CLI 实施计划](docs/plans/2026-08-01-end-to-end-cli-workflow.md)：本轮架构决策和测试计划。
 - [v0.5.2 契约迁移归因规划](docs/plans/2026-08-03-contract-migration-triage-v0.5.2.md)：配置默认值、常量和字段类型迁移的高置信度归因。
 - [v0.6.0 覆盖率与代码质量规划](docs/plans/2026-08-03-coverage-and-code-quality-v0.6.0.md)：源码符号覆盖、Ruff、mypy 和只读 audit 工作流。
+- [v0.6.x 兼容性与 doctor 规划](docs/plans/2026-08-04-compatibility-and-doctor-v0.6.x.md)：环境诊断、平台矩阵与特殊路径验证。
+- [v0.7.0 规模化与数据生命周期规划](docs/plans/2026-08-04-scale-and-data-lifecycle-v0.7.0.md)：性能/内存基线、schema 迁移、记录清理和可选依赖。
+- [v1.0.0 安全发布规划](docs/plans/2026-08-04-secure-release-v1.0.0.md)：安全门、供应链证明、PyPI 和真实项目回归矩阵。
 
-`docs/plans/` 中较早的设计文件属于历史记录，不代表当前命令或目录结构。
+`docs/plans/` 中较早的设计文件属于历史记录；版本定义冲突时，以 v0.6～v1.0 统一版本路线图和其索引的实施计划为准。
 
 ## 开发与验证
 
