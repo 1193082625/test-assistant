@@ -203,3 +203,5 @@ tests/test_diagnosis_repository.py     持久化与脱敏报告
 
 - `docs/plans/2026-07-27-python-cli-trusted-loop-roadmap.md`
 - `docs/plans/2026-08-01-end-to-end-cli-workflow.md`
+- `docs/plans/2026-08-03-contract-migration-triage-v0.5.2.md`
+- `docs/plans/2026-08-03-coverage-and-code-quality-v0.6.0.md`

@@ -242,6 +242,8 @@ poetry run test-assistant triage --path /path/to/demo-project \
 - [项目结构](docs/project-structure.md)：模块职责、依赖方向、数据流和系统不变量；
 - [可信 CLI 路线图](docs/plans/2026-07-27-python-cli-trusted-loop-roadmap.md)：范围、里程碑和后续方向；
 - [端到端 CLI 实施计划](docs/plans/2026-08-01-end-to-end-cli-workflow.md)：本轮架构决策和测试计划。
+- [v0.5.2 契约迁移归因规划](docs/plans/2026-08-03-contract-migration-triage-v0.5.2.md)：配置默认值、常量和字段类型迁移的高置信度归因。
+- [v0.6.0 覆盖率与代码质量规划](docs/plans/2026-08-03-coverage-and-code-quality-v0.6.0.md)：源码符号覆盖、Ruff、mypy 和只读 audit 工作流。
 
 `docs/plans/` 中较早的设计文件属于历史记录，不代表当前命令或目录结构。
 
