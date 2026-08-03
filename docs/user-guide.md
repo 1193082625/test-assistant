@@ -124,6 +124,11 @@ python --version
 python -m pytest --version
 ```
 
+如果本地已经安装过旧版，先移除
+```bash
+python -m pip uninstall -y test-assistant
+```
+
 安装本地 wheel：
 
 ```bash
