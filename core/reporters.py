@@ -91,3 +91,67 @@ def render_triage_markdown(record: dict[str, object]) -> str:
         ])
     lines.append("")
     return "\n".join(lines)
+
+
+def render_audit_markdown(record: dict[str, object]) -> str:
+    """从已脱敏 Audit repository 记录生成事实导向报告。"""
+    coverage = record.get("coverage")
+    lines = [
+        "# Test Assistant Audit 报告",
+        "",
+        f"- Run ID：`{record['run_id']}`",
+        f"- 时间：{record['created_at']}",
+        f"- 状态：`{record['status']}`",
+        f"- 源码摘要：`{record['source_digest']}`",
+        "",
+        "## 覆盖率",
+        "",
+    ]
+    if isinstance(coverage, dict):
+        lines.extend([
+            (
+                f"- 语句：{coverage['statements_covered']} / "
+                f"{coverage['statements_total']}"
+            ),
+            (
+                f"- 分支：{coverage['branches_covered']} / "
+                f"{coverage['branches_total']}"
+            ),
+        ])
+    else:
+        lines.append("- 未采集")
+    lines.extend(["", "## 未覆盖符号", ""])
+    gaps = [
+        symbol for symbol in record.get("symbols", [])
+        if isinstance(symbol, dict)
+        and symbol.get("state") in {"partial", "uncovered"}
+    ]
+    lines.extend(
+        f"- `{symbol['source_path']}::{symbol['qualified_name']}` "
+        f"({symbol['state']})"
+        for symbol in gaps
+    )
+    if not gaps:
+        lines.append("- 无")
+    lines.extend(["", "## 静态质量 findings", ""])
+    findings = [
+        finding for finding in record.get("findings", [])
+        if isinstance(finding, dict)
+    ]
+    lines.extend(
+        f"- **{finding['tool']}** `{finding.get('rule_code') or 'unknown'}` "
+        f"{finding.get('source_path') or '<configuration>'}:"
+        f"{finding.get('line') or '-'} — {finding['message']}"
+        for finding in findings
+    )
+    if not findings:
+        lines.append("- 无")
+    lines.extend(["", "## Adapter 状态", ""])
+    lines.extend(
+        f"- {tool['tool']}: `{tool['state']}`"
+        + (f" — {tool['reason']}" if tool.get("reason") else "")
+        for tool in record.get("tools", [])
+        if isinstance(tool, dict)
+    )
+    lines.append("")
+    return "\n".join(lines)

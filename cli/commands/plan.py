@@ -16,6 +16,7 @@ from core.planners.test_spec import plan_test_spec
 from core.repositories.test_spec import (
     TestSpecRepository
 )
+from core.repositories import AuditRepository
 
 
 def _repository_for(
@@ -66,12 +67,18 @@ def plan() -> None:
     show_default=True,
     help="规划 TestSpec 使用的模型",
 )
+@click.option(
+    "--from-audit",
+    is_flag=True,
+    help="要求目标符号存在于最近一次 Audit 覆盖缺口中",
+)
 def propose_spec(
     target_symbol: str,
     project_path: Path,
     source_path: Path,
     module_path: str,
     model: str,
+    from_audit: bool,
 ) -> None:
     """根据源码符号和契约证据提议 TestSpec。"""
     root = project_path.resolve()
@@ -88,6 +95,21 @@ def propose_spec(
         )
     if not module_path.strip():
         raise click.ClickException("module-path 不能为空")
+    if from_audit:
+        try:
+            audit_record = AuditRepository(root).load_latest()
+        except (OSError, TypeError, ValueError) as error:
+            raise click.ClickException(f"无法读取 Audit 记录: {error}") from error
+        symbols = audit_record.get("symbols", []) if audit_record else []
+        selected = any(
+            isinstance(item, dict)
+            and item.get("qualified_name") == target_symbol
+            and item.get("source_path") == source_path.as_posix()
+            and item.get("state") in {"partial", "uncovered"}
+            for item in symbols
+        )
+        if not selected:
+            raise click.ClickException("目标符号不在最近一次 Audit 覆盖缺口中")
 
     try:
         symbols = analyze_python_symbols(

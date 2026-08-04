@@ -3,6 +3,12 @@
 from dataclasses import dataclass
 
 from core.executors.base import BaseExecutor
+from core.executors.coverage_executor import (
+    CoverageExecutionResult,
+    CoverageExecutor,
+)
+from core.executors.ruff_executor import RuffExecutionResult, RuffExecutor
+from core.executors.mypy_executor import MypyExecutionResult, MypyExecutor
 from core.executors.pytest_executor import PytestExecutor
 from core.executors.vitest_executor import VitestExecutor
 

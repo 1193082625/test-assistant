@@ -1,7 +1,9 @@
 """pytest 执行器"""
 import json
+import os
 import platform
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -247,12 +249,12 @@ class PytestExecutor(BaseExecutor):
                     stdout=stdout,
                     stderr=stderr,
                     text=True,
+                    start_new_session=(os.name != "nt"),
                 )
                 try:
                     while process.poll() is None:
                         if time.monotonic() - started > timeout:
-                            process.kill()
-                            process.wait()
+                            self._terminate_process_tree(process)
                             raise subprocess.TimeoutExpired(
                                 command, timeout
                             )
@@ -269,8 +271,7 @@ class PytestExecutor(BaseExecutor):
                     )
                 except BaseException:
                     if process.poll() is None:
-                        process.kill()
-                        process.wait()
+                        self._terminate_process_tree(process)
                     raise
                 stdout.seek(0)
                 stderr.seek(0)
@@ -280,6 +281,26 @@ class PytestExecutor(BaseExecutor):
                     stdout.read(),
                     stderr.read(),
                 )
+
+    @staticmethod
+    def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+        """终止 pytest 及其子进程，避免超时或 Ctrl+C 后留下孤儿进程。"""
+        if process.poll() is not None:
+            return
+        if os.name != "nt":
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=2)
+                return
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                if process.poll() is None:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+        else:
+            process.kill()
+        process.wait()
 
     @staticmethod
     def _emit_progress_events(

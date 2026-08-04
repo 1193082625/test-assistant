@@ -23,3 +23,17 @@ jobs:
         run: poetry run pytest -q
       - name: Build distributions
         run: poetry build
+      - name: Smoke test installed wheel
+        shell: bash
+        run: |
+          python -m venv /tmp/test-assistant-wheel
+          /tmp/test-assistant-wheel/bin/pip install dist/*.whl
+          /tmp/test-assistant-wheel/bin/test-assistant --version
+          /tmp/test-assistant-wheel/bin/test-assistant audit --help
+          mkdir -p /tmp/test-assistant-fixture
+          echo 'value = 1' > /tmp/test-assistant-fixture/app.py
+          set +e
+          /tmp/test-assistant-wheel/bin/test-assistant audit --path /tmp/test-assistant-fixture --timeout 10
+          audit_status=$?
+          set -e
+          test "$audit_status" -eq 2

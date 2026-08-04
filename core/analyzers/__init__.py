@@ -22,3 +22,7 @@ from .contract_migration import (
     ContractMismatchKind,
     extract_contract_mismatches,
 )
+from .coverage import analyze_symbol_coverage
+from .coverage_impact import CoverageGapImpact, analyze_coverage_impact
+from .change_evidence import ChangeEvidence, collect_change_evidence
+from .quality import parse_mypy_findings, parse_ruff_findings

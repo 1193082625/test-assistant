@@ -1,8 +1,8 @@
 # test-assistant 项目结构
 
-> 当前版本：`v0.5.2`
+> 当前版本：`v0.6.0`
 >
-> 更新日期：2026-08-03
+> 更新日期：2026-08-04
 >
 > 适用范围：当前仓库中的 Python/pytest 可信 CLI
 
@@ -38,10 +38,11 @@ cli/
     ├── generate.py         生成候选、执行门禁、展示 diff、人工提交
     ├── verify.py           验证精确 pytest node 并触发诊断
     ├── triage.py           分诊已有 pytest 套件并保存运行记录
+    ├── audit.py            只读执行 coverage、Ruff 与 mypy 审计
     ├── run.py              执行基于快照的增量测试流程
     ├── status.py           展示最近一次验证健康状态
     ├── diagnose.py         解释已保存的 Diagnosis JSON
-    └── report.py           生成最近诊断的 Markdown 报告
+    └── report.py           生成最近诊断或 Audit 的 Markdown 报告
 ```
 
 CLI 层只负责解析参数、调用 `core` 和呈现结果。领域判断、文件安全策略和持久化不应只存在于 CLI 中。

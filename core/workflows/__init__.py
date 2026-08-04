@@ -13,6 +13,7 @@ from .triage import (
     TriageEvidence,
     triage_pytest_suite,
 )
+from .audit import run_audit
 from core.models import TriageResult
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "collect_local_git_triage_evidence",
     "collect_contract_migration_triage_evidence",
     "build_contract_migration_root_causes",
+    "run_audit",
     "TriageResult",
     "triage_pytest_suite",
 ]

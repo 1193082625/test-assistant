@@ -2,7 +2,7 @@
 
 `test-assistant` 是一个面向 Python/pytest 项目的本地智能测试 CLI。
 
-当前 `v0.5.2` 提供两条相互独立的可信闭环：为新测试执行 TestSpec 审批与候选门禁，以及对项目已有 pytest 套件执行结构化分诊、共同根因聚类、精确复跑和可选的本地 Git 历史归因。
+当前 `v0.6.0` 提供三条相互独立的可信闭环：TestSpec 审批与候选门禁、pytest 失败分诊，以及只读的 coverage/Ruff/mypy 质量审计。
 
 ## 当前能力
 
@@ -19,6 +19,8 @@
 - 自动识别配置默认值、字段类型、可选字段、关联配置和枚举契约迁移；
 - 识别 AsyncMock Result 与异步生成器生命周期中的测试 fixture 漂移；
 - 原子保存 TestSpec、候选、验证状态、脱敏诊断和 triage 运行记录。
+- 通过 `audit` 映射源码符号覆盖缺口，并汇总 Ruff 与 mypy findings；
+- 支持显式覆盖率/质量阈值、`--changed-only` 和 Markdown Audit 报告。
 
 ## 安全原则
 
@@ -64,7 +66,19 @@ export DEEPSEEK_BASE_URL="https://your-api-endpoint"
 
 `DEEPSEEK_BASE_URL` 应指向所使用的 OpenAI 兼容服务地址。不要把密钥提交到 Git。
 
-`init`、`inspect`、`run`、`triage`、`verify`、`status`、`diagnose` 和 `report` 不调用 LLM。
+`init`、`inspect`、`run`、`triage`、`audit`、`verify`、`status`、`diagnose` 和 `report` 不调用 LLM。
+
+## 只读质量审计
+
+```bash
+test-assistant audit --path .
+test-assistant audit --path . --coverage --no-quality
+test-assistant audit --path . --no-coverage --quality
+test-assistant audit --path . --changed-only
+test-assistant report --path . --audit
+```
+
+`triage` 解释测试为何失败；`audit` 报告哪些实现缺少覆盖或存在静态质量问题。Audit 不联网、不安装缺失工具、不执行 Ruff `--fix`，也不修改源码、测试或 Git。目标环境缺少 pytest-cov、Ruff 或 mypy 时会明确显示 adapter 降级状态。
 
 ## 快速开始
 
@@ -226,6 +240,7 @@ poetry run test-assistant triage --path /path/to/demo-project \
 ├── diagnoses/              诊断历史与 latest.json
 ├── permissions.json        当前仓库的本地 Git 只读授权
 ├── triage/                 版本化套件分诊记录与 latest.json
+├── audits/                 版本化覆盖率/质量审计记录与 latest.json
 ├── verification/           最近一次验证状态
 └── reports/                Markdown 报告
 ```
@@ -236,7 +251,7 @@ poetry run test-assistant triage --path /path/to/demo-project \
 - Web Dashboard 和 watch 尚未实现；
 - Vitest 执行器不属于当前 TestSpec 生成闭环；
 - 没有已批准强契约时，稳定失败通常返回 `INCONCLUSIVE`；
-- v0.5.2 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
+- v0.6.0 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
 - 当前使用版本化 JSON，尚未引入 SQLite 或远程服务；
 - 真实 LLM 验证是显式 smoke test，不属于默认自动化测试。
 

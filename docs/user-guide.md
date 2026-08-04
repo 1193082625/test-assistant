@@ -1,8 +1,8 @@
 # test-assistant 真实项目使用指南
 
-> 当前版本：`v0.5.2`
+> 当前版本：`v0.6.0`
 >
-> 更新日期：2026-08-03
+> 更新日期：2026-08-04
 >
 > 当前主流程：Python 3.13 + pytest
 
@@ -62,14 +62,14 @@ poetry build
 成功后生成：
 
 ```text
-dist/test_assistant-0.5.2-py3-none-any.whl
-dist/test_assistant-0.5.2.tar.gz
+dist/test_assistant-0.6.0-py3-none-any.whl
+dist/test_assistant-0.6.0.tar.gz
 ```
 
 记下 wheel 的绝对路径，例如：
 
 ```text
-/absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
+/absolute/path/to/test-assistant/dist/test_assistant-0.6.0-py3-none-any.whl
 ```
 
 `poetry build` 只生成本地安装包，不会上传或发布。
@@ -133,7 +133,7 @@ python -m pip uninstall -y test-assistant
 
 ```bash
 python -m pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.6.0-py3-none-any.whl
 ```
 
 强制重装
@@ -141,7 +141,7 @@ python -m pip install \
  python -m pip install \
   --force-reinstall \
   --no-deps \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.6.0-py3-none-any.whl
 ```
 
 验证：
@@ -166,7 +166,7 @@ poetry run python -m pytest --version
 
 ```bash
 poetry run pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.6.0-py3-none-any.whl
 ```
 
 验证：
@@ -294,6 +294,23 @@ test-assistant triage --path . --test-path tests/test_service.py \
 运行记录保存在 `.autotest/triage/<run-id>.json` 和 `latest.json`。失败诊断继续保存在 `.autotest/diagnoses/`，可使用 `diagnose` 与 `report` 查看。
 
 `triage` 使用四阶段进度展示 pytest 执行、失败聚类、代表节点复跑和诊断保存。完整套件较慢时会显示已运行时间、已完成数量和百分比；`--timeout` 可以覆盖默认的 120 秒套件超时。
+
+#### v0.6.0 只读质量审计
+
+`triage` 回答“测试为什么失败”，`audit` 回答“哪些实现缺少验证或存在静态质量问题”：
+
+```bash
+test-assistant audit --path . --timeout 300
+test-assistant audit --path . --test-path tests/unit
+test-assistant audit --path . --changed-only
+test-assistant report --path . --audit
+```
+
+默认同时尝试 pytest-cov、Ruff 和 mypy。可以使用 `--no-coverage` 或 `--no-quality` 禁用一组 adapter，并用 `--statement-threshold`、`--branch-threshold`、`--max-ruff-findings`、`--max-mypy-errors` 设置显式门禁。没有阈值时只报告，不会因为覆盖率低而失败。
+
+`--changed-only` 优先比较 `.autotest/snapshot.json` 的新增/修改符号；没有快照时只在当前仓库已有本地 Git 只读授权后读取工作区差异。Audit 不联网、不安装工具、不执行自动修复，也不修改源码、测试、snapshot 或 Git。缺失的 adapter 会显示 `unavailable`，其他 adapter 仍可继续。
+
+Audit 记录保存在 `.autotest/audits/`。退出码 `0` 表示执行完成且满足显式门禁，`1` 表示门禁或测试失败，`2` 表示参数、全部 adapter 不可用或基础设施错误。
 
 #### 本地 Git 历史授权
 
@@ -590,7 +607,7 @@ python -m pytest -q
 ```bash
 python -m pip install \
   --upgrade \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.5.2-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.6.0-py3-none-any.whl
 ```
 
 卸载 CLI：

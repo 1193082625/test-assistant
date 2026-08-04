@@ -3,12 +3,19 @@ import pytest
 from click.testing import CliRunner
 from cli.main import cli
 from core.models import (
+    AuditResult,
+    AuditStatus,
+    CoverageSummary,
+    SymbolCoverage,
+    ToolState,
+    ToolStatus,
     TestSpec as Spec,
     TestSpecStatus as SpecStatus,
 )
 from core.repositories.test_spec import (
     TestSpecRepository as SpecRepository,
 )
+from core.repositories import AuditRepository
 
 
 def make_spec() -> Spec:
@@ -35,6 +42,37 @@ def test_plan_list_shows_empty_state(tmp_path):
     assert result.output == (
         "没有 TestSpec\n"
     )
+
+
+def test_plan_from_audit_rejects_symbol_not_in_latest_gap(tmp_path):
+    source = tmp_path / "demo.py"
+    source.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    AuditRepository(tmp_path).save(AuditResult(
+        run_id="audit-plan-001",
+        status=AuditStatus.PASSED,
+        command=("test-assistant", "audit"),
+        coverage=CoverageSummary(0, 2, 0, 0),
+        symbols=(SymbolCoverage(
+            source_path="demo.py", qualified_name="demo.other",
+            kind="function", start_line=1, end_line=2,
+            summary=CoverageSummary(0, 2, 0, 0),
+            missing_lines=(1, 2), missing_branches=(),
+        ),),
+        findings=(),
+        tools=(ToolStatus(
+            tool="coverage", state=ToolState.COMPLETED,
+            version="7", reason=None,
+        ),),
+        source_digest="sha256:abc",
+    ))
+
+    result = CliRunner().invoke(cli, [
+        "plan", "propose", "demo.add", "--path", str(tmp_path),
+        "--source-path", "demo.py", "--module-path", "demo", "--from-audit",
+    ])
+
+    assert result.exit_code == 1
+    assert "目标符号不在最近一次 Audit 覆盖缺口中" in result.output
 
 def test_plan_list_shows_spec_summary(
     tmp_path,

@@ -53,6 +53,19 @@ from .triage import (
     TriageResult,
 )
 
+from .audit import (
+    AuditResult,
+    AuditStatus,
+    AuditThresholds,
+    CoverageState,
+    CoverageSummary,
+    QualityFinding,
+    QualityFindingKind,
+    SymbolCoverage,
+    ToolState,
+    ToolStatus,
+)
+
 __all__ = [
     "ContractMigrationEvidence",
     "ContractMigrationType",
@@ -94,4 +107,14 @@ __all__ = [
     "TriagePhase",
     "FailureCluster",
     "TriageResult",
+    "AuditResult",
+    "AuditStatus",
+    "AuditThresholds",
+    "CoverageState",
+    "CoverageSummary",
+    "QualityFinding",
+    "QualityFindingKind",
+    "SymbolCoverage",
+    "ToolState",
+    "ToolStatus",
 ]
