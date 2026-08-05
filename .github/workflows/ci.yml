@@ -29,6 +29,7 @@ jobs:
           python -m venv /tmp/test-assistant-wheel
           /tmp/test-assistant-wheel/bin/pip install dist/*.whl
           /tmp/test-assistant-wheel/bin/test-assistant --version
+          /tmp/test-assistant-wheel/bin/test-assistant doctor --help
           /tmp/test-assistant-wheel/bin/test-assistant audit --help
           mkdir -p /tmp/test-assistant-fixture
           echo 'value = 1' > /tmp/test-assistant-fixture/app.py
