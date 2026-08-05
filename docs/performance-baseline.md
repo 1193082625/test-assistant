@@ -79,3 +79,17 @@ their expected counts and logical digests. Task 4 was therefore marked
 `not needed`: v0.7.0 does not add speculative caches, concurrency or semantic
 changes without evidence of a budget violation. Future comparisons must use
 the same profile and output digest before attributing a change to performance.
+
+## Real-project read-only release check
+
+The v0.7.0 local release check scanned an existing Python/pytest repository
+without recording its path or source contents. The project snapshot adapter
+observed 1,247 files and 10,815 Python symbols. Across three measured samples,
+the median wall time was 12.752 seconds and the maximum traced peak was
+11,761,078 bytes, both below the broad CI safety limits.
+
+Before and after Doctor JSON, migration dry-run, cleanup JSON dry-run and the
+project benchmark, the Git status, `.autotest` path set, file SHA-256 values and
+symbolic-link targets were identical. Cleanup reported 0 candidates, 56
+protected records and 0 reclaimable bytes. These figures are acceptance
+evidence for that single repository, not a cross-project SLA.

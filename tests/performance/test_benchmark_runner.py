@@ -164,3 +164,39 @@ def test_cli_rejects_unknown_profile(capsys: pytest.CaptureFixture[str]) -> None
 
     assert exit_code == 2
     assert "invalid choice" in capsys.readouterr().err
+
+
+def test_project_profile_is_read_only(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = tmp_path / "真实 project"
+    project.mkdir()
+    source = project / "app.py"
+    source.write_text(
+        "def add(left, right):\n    return left + right\n",
+        encoding="utf-8",
+    )
+    before = {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in project.rglob("*")
+        if path.is_file()
+    }
+
+    exit_code = run_benchmarks.main(
+        ["--profile", "ci", "--project", str(project), "--json"],
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["benchmarks"][0]["name"] == "project_snapshot_and_symbols"
+    assert payload["benchmarks"][0]["input_counts"] == {
+        "files": 1,
+        "python_symbols": 1,
+    }
+    after = {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in project.rglob("*")
+        if path.is_file()
+    }
+    assert after == before

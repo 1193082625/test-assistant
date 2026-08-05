@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -22,6 +23,8 @@ from core.benchmarks import (  # noqa: E402
     render_report,
     run_benchmark,
 )
+from core.analyzers.framework import EXCLUDE_DIRS  # noqa: E402
+from core.analyzers.snapshot import take_snapshot  # noqa: E402
 
 
 PROFILES = ("ci", "large")
@@ -37,13 +40,21 @@ def main(
     parser.add_argument("--profile", required=True, choices=PROFILES)
     parser.add_argument("--json", action="store_true", dest="json_output")
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--project",
+        type=Path,
+        help="只读测量真实项目的 snapshot/symbol 扫描",
+    )
     try:
         arguments = parser.parse_args(argv)
     except SystemExit as error:
         return int(error.code)
 
     try:
-        if cases is None and not REGISTERED_BENCHMARKS:
+        if cases is None and arguments.project is not None:
+            selected_cases = _build_project_cases(arguments.project)
+            report = _run_cases(arguments.profile, selected_cases)
+        elif cases is None and not REGISTERED_BENCHMARKS:
             from tests.performance.benchmark_cases import (
                 build_benchmark_cases,
             )
@@ -75,6 +86,47 @@ def main(
         print(f"benchmark error: {error}", file=sys.stderr)
         return 1
     return 0
+
+
+def _build_project_cases(project: Path) -> tuple[BenchmarkCase, ...]:
+    root = project.resolve()
+    if not root.is_dir():
+        raise ValueError(f"project is not a directory: {project}")
+
+    baseline, _ = take_snapshot(str(root), EXCLUDE_DIRS)
+    expected_files = len(baseline)
+    expected_symbols = sum(len(item.symbols or ()) for item in baseline)
+
+    def snapshot_operation() -> str:
+        snapshots, skipped = take_snapshot(str(root), EXCLUDE_DIRS)
+        symbol_count = sum(len(item.symbols or ()) for item in snapshots)
+        if len(snapshots) != expected_files or symbol_count != expected_symbols:
+            raise RuntimeError("project changed during benchmark")
+        payload = {
+            "files": [
+                [item.path, item.hash, len(item.symbols or ())]
+                for item in snapshots
+            ],
+            "skipped": skipped,
+            "symbol_count": symbol_count,
+        }
+        encoded = json.dumps(
+            payload,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    return (
+        BenchmarkCase(
+            name="project_snapshot_and_symbols",
+            input_counts={
+                "files": expected_files,
+                "python_symbols": expected_symbols,
+            },
+            operation=snapshot_operation,
+        ),
+    )
 
 
 def _run_cases(
