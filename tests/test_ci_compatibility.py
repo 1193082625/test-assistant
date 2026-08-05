@@ -75,3 +75,25 @@ def test_python_314_probe_is_non_blocking_and_not_supported():
     )
     assert "--ignore-requires-python" in script
     assert "unsupported_python_version" in script
+
+
+def test_ci_runs_only_the_bounded_performance_profile():
+    performance = _workflow_jobs()["performance-smoke"]
+
+    assert performance["runs-on"] == "ubuntu-latest"
+    assert performance["timeout-minutes"] == 10
+    commands = [
+        step["run"]
+        for step in performance["steps"]
+        if "run" in step
+    ]
+    assert (
+        "poetry run pytest tests/performance -m performance -q"
+        in commands
+    )
+    assert (
+        "poetry run python scripts/run_benchmarks.py "
+        "--profile ci --json"
+        in commands
+    )
+    assert all("--profile large" not in command for command in commands)

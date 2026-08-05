@@ -42,19 +42,25 @@ def main(
     except SystemExit as error:
         return int(error.code)
 
-    selected_cases = tuple(REGISTERED_BENCHMARKS if cases is None else cases)
     try:
-        grouped_results = {
-            case.name: run_benchmark(case, profile=arguments.profile)
-            for case in selected_cases
-        }
-        if len(grouped_results) != len(selected_cases):
-            raise ValueError("benchmark names must be unique")
-        report = render_report(
-            profile=arguments.profile,
-            benchmark_results=grouped_results,
-            limits=BenchmarkLimits(),
-        )
+        if cases is None and not REGISTERED_BENCHMARKS:
+            from tests.performance.benchmark_cases import (
+                build_benchmark_cases,
+            )
+
+            with tempfile.TemporaryDirectory(
+                prefix="test-assistant-benchmarks-"
+            ) as temporary_directory:
+                selected_cases = build_benchmark_cases(
+                    arguments.profile,
+                    Path(temporary_directory),
+                )
+                report = _run_cases(arguments.profile, selected_cases)
+        else:
+            selected_cases = tuple(
+                REGISTERED_BENCHMARKS if cases is None else cases
+            )
+            report = _run_cases(arguments.profile, selected_cases)
         rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
         if arguments.output is not None:
             _atomic_write(arguments.output, rendered)
@@ -69,6 +75,23 @@ def main(
         print(f"benchmark error: {error}", file=sys.stderr)
         return 1
     return 0
+
+
+def _run_cases(
+    profile: str,
+    cases: Sequence[BenchmarkCase],
+) -> dict[str, object]:
+    grouped_results = {
+        case.name: run_benchmark(case, profile=profile)
+        for case in cases
+    }
+    if len(grouped_results) != len(cases):
+        raise ValueError("benchmark names must be unique")
+    return render_report(
+        profile=profile,
+        benchmark_results=grouped_results,
+        limits=BenchmarkLimits(),
+    )
 
 
 def _atomic_write(path: Path, contents: str) -> None:

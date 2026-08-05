@@ -24,6 +24,23 @@ jobs:
       - name: Run tests
         run: poetry run pytest -q
 
+  performance-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Poetry
+        run: pipx install poetry
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      - name: Verify performance adapters
+        run: poetry run pytest tests/performance -m performance -q
+      - name: Run CI performance profile
+        run: poetry run python scripts/run_benchmarks.py --profile ci --json
+
   build:
     needs: test
     runs-on: ubuntu-latest
