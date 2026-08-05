@@ -43,7 +43,7 @@ TestSpec 人工审批
 
 ## 环境要求
 
-- Python `>=3.13,<4.0`
+- Python `>=3.13,<3.14`
 - Poetry
 - 目标项目可以在当前 Python 环境运行 pytest
 
