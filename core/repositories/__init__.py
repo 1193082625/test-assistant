@@ -15,6 +15,7 @@ from .verification import VerificationStateRepository
 from .triage import TriageRepository
 from .permissions import GitPermissionRepository, git_repository_identity
 from .audit import AuditRepository
+from .schema import LoadedRecord, SchemaRegistry, atomic_write_json
 
 __all__ = [
     "DiagnosisRepository",
@@ -29,4 +30,7 @@ __all__ = [
     "GitPermissionRepository",
     "git_repository_identity",
     "AuditRepository",
+    "LoadedRecord",
+    "SchemaRegistry",
+    "atomic_write_json",
 ]
