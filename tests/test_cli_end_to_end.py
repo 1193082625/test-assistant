@@ -356,3 +356,134 @@ def test_cli_triage_automatically_confirms_config_migration(tmp_path):
     assert "旧契约: 10" in result.output
     assert "当前契约: 20" in result.output
     assert "migration_commit:" in result.output
+
+
+def test_cli_clean_has_no_surprises_for_mixed_project_assets(tmp_path):
+    project = tmp_path / "clean-project"
+    project.mkdir()
+    created_at = "2000-01-01T00:00:00+00:00"
+    audit_payload = {
+        "schema_version": 2,
+        "record_type": "audit",
+        "run_id": "old-audit",
+        "created_at": created_at,
+        "status": "passed",
+        "command": ["test-assistant", "audit"],
+        "source_digest": "sha256:audit",
+        "thresholds": None,
+        "coverage": None,
+        "symbols": [],
+        "findings": [],
+        "tools": [],
+    }
+    triage_payload = {
+        "schema_version": 2,
+        "record_type": "triage",
+        "run_id": "old-triage",
+        "created_at": created_at,
+        "pytest": {},
+        "clusters": [],
+        "diagnosis_references": [],
+    }
+    diagnosis_payload = {
+        "schema_version": 2,
+        "record_type": "diagnosis",
+        "created_at": created_at,
+        "diagnosis": {
+            "summary": "受保护诊断",
+            "category": "inconclusive",
+            "confidence": "low",
+            "evidence": [],
+            "locations": [],
+            "suggested_actions": [],
+        },
+    }
+    managed_payloads = {
+        ".autotest/audits/old-audit.json": audit_payload,
+        ".autotest/audits/latest.json": audit_payload,
+        ".autotest/triage/old-triage.json": triage_payload,
+        ".autotest/triage/latest.json": triage_payload,
+        ".autotest/diagnoses/old-diagnosis.json": diagnosis_payload,
+        ".autotest/diagnoses/latest.json": diagnosis_payload,
+        ".autotest/verification/latest.json": {
+            "schema_version": 2,
+            "record_type": "verification",
+            "verified_at": created_at,
+            "status": "passed",
+            "category": None,
+            "confidence": None,
+            "diagnosis_record": None,
+            "reproduction_command": "pytest -q",
+        },
+        ".autotest/permissions.json": {
+            "schema_version": 2,
+            "record_type": "git_permission",
+            "git_history": {},
+        },
+    }
+    for relative_path, payload in managed_payloads.items():
+        path = project / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    sentinels = {
+        ".autotest/snapshot.json": b"snapshot",
+        ".autotest/config.yaml": b"mode: auto\n",
+        ".autotest/plans/spec.json": b"test spec",
+        ".autotest/candidates/item.json": b"candidate",
+        "tests/test_existing.py": b"def test_existing(): pass\n",
+    }
+    for relative_path, contents in sentinels.items():
+        path = project / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
+
+    def tree_state() -> dict[str, bytes | None]:
+        return {
+            path.relative_to(project).as_posix(): (
+                path.read_bytes() if path.is_file() else None
+            )
+            for path in sorted(project.rglob("*"))
+        }
+
+    runner = CliRunner()
+    before = tree_state()
+    preview = runner.invoke(
+        cli,
+        [
+            "clean",
+            "--path",
+            str(project),
+            "--older-than-days",
+            "0",
+            "--keep-latest",
+            "0",
+        ],
+    )
+    assert preview.exit_code == 0, preview.output
+    assert tree_state() == before
+
+    applied = runner.invoke(
+        cli,
+        [
+            "clean",
+            "--path",
+            str(project),
+            "--older-than-days",
+            "0",
+            "--keep-latest",
+            "0",
+            "--apply",
+        ],
+        input="y\n",
+    )
+    assert applied.exit_code == 0, applied.output
+    assert not (project / ".autotest/audits/old-audit.json").exists()
+    assert not (project / ".autotest/triage/old-triage.json").exists()
+    after = tree_state()
+    removed = {
+        ".autotest/audits/old-audit.json",
+        ".autotest/triage/old-triage.json",
+    }
+    assert {
+        path: contents for path, contents in before.items() if path not in removed
+    } == after
