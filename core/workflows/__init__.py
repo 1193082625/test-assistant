@@ -17,6 +17,7 @@ from .audit import run_audit
 from core.models import TriageResult
 from .doctor import run_doctor
 from .migrate import execute_migration, plan_migration
+from .clean import execute_cleanup, plan_cleanup
 
 __all__ = [
     "VerificationResult",
@@ -35,4 +36,6 @@ __all__ = [
     "run_doctor",
     "plan_migration",
     "execute_migration",
+    "plan_cleanup",
+    "execute_cleanup",
 ]

@@ -79,6 +79,14 @@ from .migration import (
     MigrationPlan,
     MigrationResult,
 )
+from .cleanup import (
+    CleanupCandidate,
+    CleanupPlan,
+    CleanupProtection,
+    CleanupReason,
+    CleanupRecordType,
+    CleanupResult,
+)
 
 __all__ = [
     "ContractMigrationEvidence",
@@ -140,4 +148,10 @@ __all__ = [
     "MigrationItem",
     "MigrationPlan",
     "MigrationResult",
+    "CleanupCandidate",
+    "CleanupPlan",
+    "CleanupProtection",
+    "CleanupReason",
+    "CleanupRecordType",
+    "CleanupResult",
 ]
