@@ -4,6 +4,11 @@ This document records repeatable evidence for the v0.7.0 `large` profile. It
 is an engineering baseline from one fixed machine, not a speed SLA for other
 machines or repositories.
 
+Users should treat these numbers as regression evidence for the recorded input
+shape, not as a promise that every real repository will finish in the same
+time. Source layout, filesystem, Git history and test topology can materially
+change results.
+
 ## Measurement contract
 
 - The generator seed and repository contents are deterministic.
@@ -23,6 +28,12 @@ Run the profiles with:
 poetry run python scripts/run_benchmarks.py --profile ci --json
 poetry run python scripts/run_benchmarks.py --profile large --json
 ```
+
+The `ci` profile contains 100 modules, 10 functions per module, 200 pytest
+tests and 5 Git commits. It runs in CI with broad `30s / 512 MiB traced peak`
+safety limits. The `large` profile contains 1,000 modules, 10 functions per
+module, 2,000 tests and 25 commits; it is a fixed-machine/manual release
+measurement and is not part of the default test suite.
 
 ## Fixed-machine large baseline
 
@@ -60,3 +71,11 @@ Stable output digests from this run:
 The generated fixture and raw temporary report are intentionally not tracked.
 The report contains counts, measurements, and digests only; it contains no
 fixture absolute path or project source text.
+
+## Optimization decision
+
+All five measured paths stayed below the v0.7.0 safety budget and preserved
+their expected counts and logical digests. Task 4 was therefore marked
+`not needed`: v0.7.0 does not add speculative caches, concurrency or semantic
+changes without evidence of a budget violation. Future comparisons must use
+the same profile and output digest before attributing a change to performance.

@@ -1,6 +1,6 @@
 # test-assistant 项目结构
 
-> 当前版本：`v0.6.2`
+> 当前版本：`v0.7.0`
 >
 > 更新日期：2026-08-05
 >
@@ -43,6 +43,8 @@ cli/
     ├── triage.py           分诊已有 pytest 套件并保存运行记录
     ├── audit.py            只读执行 coverage、Ruff 与 mypy 审计
     ├── doctor.py           只读展示环境诊断文本或版本化 JSON
+    ├── migrate.py          预览或显式应用运行记录 schema 迁移
+    ├── clean.py            预览或显式清理受控历史记录
     ├── run.py              执行基于快照的增量测试流程
     ├── status.py           展示最近一次验证健康状态
     ├── diagnose.py         解释已保存的 Diagnosis JSON
@@ -66,6 +68,7 @@ core/
 ├── workflows/              候选提交、验证和已有套件分诊编排
 ├── graphs/                 现有增量运行 Graph
 ├── llm/                    LLMClient 适配
+├── optional_dependencies.py 可选 extra 的稳定检查与错误模型
 ├── reporters.py            DiagnosisRecord → Markdown
 └── utils.py                CLI 使用的项目根目录查找
 ```
@@ -78,6 +81,8 @@ core/
 | `models/diagnosis.py` | 五类诊断、置信度、证据、位置和建议动作 |
 | `models/triage.py` | pytest issue、失败簇和 suite triage 结果 |
 | `models/environment.py` | Doctor 单项状态、汇总状态和 schema v1 JSON 契约 |
+| `models/migration.py` | schema 迁移计划、动作和执行结果 |
+| `models/cleanup.py` | 清理候选、保护原因、计划和执行结果 |
 | `analyzers/source.py` | Python 符号、可测性、导入关系和测试索引 |
 | `analyzers/contract.py` | docstring、类型提示、Schema 和已有测试证据 |
 | `analyzers/contract_migration.py` | 从失败测试、Pydantic 错误和 warning 提取旧契约候选 |
@@ -90,6 +95,8 @@ core/
 | `workflows/verification.py` | 门禁、三次精确复跑、归因和记录保存 |
 | `workflows/triage.py` | 已有 suite 聚类、代表 node 复跑和固定优先级归因 |
 | `workflows/doctor.py` | 聚合 Python、pytest、Git 和可选 adapter 的只读环境事实 |
+| `workflows/migrate.py` | 白名单扫描、事务备份、显式迁移和 latest 修复 |
+| `workflows/clean.py` | 只读候选规划、引用保护、隔离移动和失败回滚 |
 | `executors/environment_probe.py` | 以参数数组、有限超时和有限输出执行版本探测 |
 | `diagnosticians/clustering.py` | 去除临时路径、地址和时间戳的稳定失败指纹 |
 | `diagnosticians/attribution.py` | TestSpec、契约、门禁、位置和执行证据归因 |
@@ -97,6 +104,7 @@ core/
 | `repositories/diagnosis.py` | 版本化诊断 JSON、原子写入和敏感信息脱敏 |
 | `repositories/verification.py` | 最近一次健康/诊断状态，不删除诊断历史 |
 | `repositories/triage.py` | 脱敏、限长、版本化的 suite 运行记录与 latest |
+| `repositories/schema.py` | versioned JSON 校验、纯内存迁移和原子 JSON 写入 |
 
 ## 依赖方向
 
@@ -117,6 +125,8 @@ flowchart LR
 ```
 
 `core/models` 不依赖 CLI。repositories 不负责业务审批；workflow 不直接解析 Click 参数。
+
+base wheel 只依赖 Click/PyYAML。`cli.commands.plan`、`generate` 和 `run` 在 handler 真正需要时才导入 LLM/LangGraph；缺少 `[llm]` 由 `core/optional_dependencies.py` 映射为稳定原因。`[quality]` 只安装外部 Audit adapters，不改变领域依赖方向。
 
 ## 端到端数据流
 
@@ -184,11 +194,17 @@ flowchart LR
 ├── triage/
 │   ├── RUN_ID.json                    版本化已有套件分诊记录
 │   └── latest.json                    最近一次套件分诊摘要
+├── audits/
+│   ├── RUN_ID.json                    版本化覆盖率/质量审计记录
+│   └── latest.json                    最近一次审计摘要
+├── .trash/                            clean 执行期间的受控临时隔离区
 └── reports/
     └── latest.md                      默认 Markdown 报告
 ```
 
 候选文件和正式文件是两个不同区域。未经两阶段确认，候选不能进入 `test_cases/`。
+
+Diagnosis、Triage、Audit、Verification 和 permission 新记录使用 schema v2 与稳定 `record_type`。读取 v1 只做内存迁移；只有显式 `migrate --apply` 可以改写受控记录。`.trash` 只在 clean 事务执行期间存在，成功或回滚后都不应残留。
 
 ## 必须保持的系统不变量
 
@@ -203,6 +219,9 @@ flowchart LR
 - 成功验证不删除历史诊断，但会更新当前健康状态。
 - JSON 正式路径使用临时文件、flush、fsync 和原子 replace。
 - 诊断持久化和报告必须脱敏。
+- 普通 repository 读取不得将 v1 自动写回磁盘。
+- `migrate` 和 `clean` 默认 dry-run，apply 必须人工确认。
+- `clean` 不自动运行，不清理用户资产或突破最新数量、引用和文件类型保护。
 
 ## 测试对应关系
 
@@ -216,6 +235,13 @@ tests/test_cli_doctor.py               文本/JSON 输出、参数和退出码
 tests/test_path_compatibility.py       特殊路径、符号链接和只读边界
 tests/test_compatibility_manifest.py   兼容清单校验和生成文档防漂移
 tests/test_ci_compatibility.py         单次构建与平台 wheel 矩阵契约
+tests/test_optional_dependencies.py   extra 缺失原因、退出码和延迟导入边界
+tests/test_installed_extras.py        base/llm/quality 安装声明与 base 导入契约
+tests/test_repository_migrations.py   v1 内存升级、v2 写入和 latest 恢复
+tests/test_migrate_workflow.py         迁移白名单、事务备份和失败回滚
+tests/test_cli_migrate.py              migrate dry-run/apply/JSON CLI
+tests/test_clean_workflow.py           保留决策、引用保护、竞态和隔离回滚
+tests/test_cli_clean.py                clean 预览、确认、JSON 与退出码
 tests/test_cli_plan_propose.py         TestSpec 提议入口
 tests/test_cli_generate.py             审批、diff 与提交
 tests/test_cli_verify.py               真实 pytest 三次验证

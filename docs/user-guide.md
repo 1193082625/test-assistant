@@ -1,6 +1,6 @@
 # test-assistant 真实项目使用指南
 
-> 当前版本：`v0.6.2`
+> 当前版本：`v0.7.0`
 >
 > 更新日期：2026-08-05
 >
@@ -20,6 +20,7 @@
 → 人工确认 diff
 → verify
 → status / diagnose / report
+→ migrate / clean（按需，默认只预览）
 ```
 
 ## 1. 当前安装模型
@@ -63,14 +64,14 @@ poetry build
 成功后生成：
 
 ```text
-dist/test_assistant-0.6.2-py3-none-any.whl
-dist/test_assistant-0.6.2.tar.gz
+dist/test_assistant-0.7.0-py3-none-any.whl
+dist/test_assistant-0.7.0.tar.gz
 ```
 
 记下 wheel 的绝对路径，例如：
 
 ```text
-/absolute/path/to/test-assistant/dist/test_assistant-0.6.2-py3-none-any.whl
+/absolute/path/to/test-assistant/dist/test_assistant-0.7.0-py3-none-any.whl
 ```
 
 `poetry build` 只生成本地安装包，不会上传或发布。
@@ -134,7 +135,7 @@ python -m pip uninstall -y test-assistant
 
 ```bash
 python -m pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.6.2-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.7.0-py3-none-any.whl
 ```
 
 强制重装
@@ -142,7 +143,7 @@ python -m pip install \
  python -m pip install \
   --force-reinstall \
   --no-deps \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.6.2-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.7.0-py3-none-any.whl
 ```
 
 验证：
@@ -167,7 +168,7 @@ poetry run python -m pytest --version
 
 ```bash
 poetry run pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.6.2-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.7.0-py3-none-any.whl
 ```
 
 验证：
@@ -179,9 +180,36 @@ poetry run python -m pytest -q
 
 这种安装方式适合本地试用，不会自动把 `test-assistant` 写入目标项目的 `pyproject.toml`。重新创建 Poetry 环境后需要重新安装。
 
+### 选择安装能力
+
+v0.7.0 的 base wheel 只强制依赖 Click 和 PyYAML，适合 `doctor`、`init`、`inspect`、`triage`、`audit`（adapter 可降级）、`verify`、`status`、`diagnose`、`report`、`migrate`、`clean`，以及 `plan list/show/approve/reject`：
+
+```bash
+python -m pip install \
+  /absolute/path/to/test-assistant/dist/test_assistant-0.7.0-py3-none-any.whl
+```
+
+按用途选择 extra：
+
+```bash
+# plan propose、generate 和 legacy graph run
+python -m pip install \
+  '/absolute/path/to/test-assistant/dist/test_assistant-0.7.0-py3-none-any.whl[llm]'
+
+# pytest-cov、coverage、Ruff 和 mypy
+python -m pip install \
+  '/absolute/path/to/test-assistant/dist/test_assistant-0.7.0-py3-none-any.whl[quality]'
+
+# 同时安装上述两组
+python -m pip install \
+  '/absolute/path/to/test-assistant/dist/test_assistant-0.7.0-py3-none-any.whl[all]'
+```
+
+缺少 `[llm]` 时，相关命令返回退出码 `2` 和原因 `llm_extra_required`，不会显示 traceback、联网或在运行时安装软件。目标项目自己的 `ImportError` 不会被误报为 extra 缺失。未安装 `[quality]` 时，Doctor 和 Audit 会把相应 adapter 报告为 `unavailable`；也可以使用目标项目原本安装的质量工具。
+
 后续示例使用已经激活的普通 venv，命令写作 `test-assistant`。如果目标项目使用 Poetry，请在每条命令前加 `poetry run`。
 
-### v0.6.2 环境与兼容性诊断
+### v0.7.0 环境与兼容性诊断
 
 安装后、初始化目标项目之前，建议先确认 CLI 实际运行环境：
 
@@ -201,11 +229,11 @@ Doctor 是只读命令：不读取 `.env` 或 Git 历史，不联网、不安装
 - `1`：核心 Python 或 pytest 环境不兼容；
 - `2`：路径、探测或内部基础设施错误。
 
-v0.6.2 认证 Ubuntu 和 macOS 上的 Python 3.13，并覆盖空格、中文、长路径、项目目录符号链接、损坏链接、非 Git 与只读目录。Windows 尚未认证；Python 3.14 只做非阻塞探测且安装元数据会拒绝。完整状态见[兼容性支持表](compatibility.md)。
+v0.7.0 延续 Ubuntu 和 macOS 上的 Python 3.13 认证，并覆盖空格、中文、长路径、项目目录符号链接、损坏链接、非 Git 与只读目录。Windows 尚未认证；Python 3.14 只做非阻塞探测且安装元数据会拒绝。完整状态见[兼容性支持表](compatibility.md)。
 
 ## 5. 配置 LLM
 
-只有以下两个命令调用 LLM：
+以下两个命令调用 LLM：
 
 ```text
 plan propose
@@ -227,10 +255,10 @@ export DEEPSEEK_BASE_URL="https://your-openai-compatible-endpoint"
 - shell 历史中的命令参数；
 - 测试失败消息。
 
-下面的命令不调用 LLM：
+`run` 使用 legacy LangGraph，因此同样需要 `[llm]`，但当前 graph 本身不调用模型。下面的命令既不调用 LLM，也不需要 `[llm]`：
 
 ```text
-init  inspect  run  triage  verify  status  diagnose  report
+init  inspect  triage  audit  doctor  verify  status  diagnose  report  migrate  clean
 ```
 
 ## 6. 初始化目标项目
@@ -599,7 +627,78 @@ test-assistant report \
 
 诊断记录和报告会对常见 token、password、secret、API key 和 Bearer 凭据脱敏，并限制执行输出体积。
 
-## 16. 检查试用产生的变化
+## 16. 管理 `.autotest` schema 和历史容量
+
+### 安全读取与显式迁移
+
+v0.7.0 新写入的 Diagnosis、Triage、Audit、Verification 和 Git permission 记录使用 schema v2，并包含稳定的 `record_type`。旧 schema v1 记录仍可读取：repository 只在内存中将其升级为 v2，`status`、`report` 等普通读取不会修改磁盘 bytes。
+
+Audit、Triage 或 Diagnosis 的 `latest.json` 损坏或不受支持时，读取可以从不可变历史中选择最近的有效记录，并显示恢复来源；它不会静默修复 latest。Verification 和 permission 没有对应的不可变历史，损坏时会明确失败。未知未来 schema、错误 `record_type` 和损坏 JSON 不会被猜测性改写。
+
+先预览迁移：
+
+```bash
+test-assistant migrate --path .
+test-assistant migrate --path . --dry-run
+test-assistant migrate --path . --json
+```
+
+确认计划后才应用：
+
+```bash
+test-assistant migrate --path . --apply
+```
+
+默认行为等同 dry-run。JSON 只允许用于预览；`--apply` 会展示计划并再次要求人工确认。应用前会在项目同级创建完整受控备份，所有目标使用原子写入；全部成功后删除备份，任一写入失败则恢复原始 bytes。未知未来 schema 会阻止整个 apply。退出码 `0` 表示预览、取消或迁移成功，`1` 表示扫描、迁移或事务失败，`2` 表示 Click 参数错误。
+
+### 历史不会自动清理
+
+`.autotest` 当前没有后台任务或定时自动清理。频繁执行 Audit、Triage 和诊断会持续生成历史文件，因此应根据项目运行频率定期检查容量。推荐先执行只读预览：
+
+```bash
+test-assistant clean --path .
+test-assistant clean --path . --dry-run
+test-assistant clean --path . --json
+```
+
+默认清理策略：
+
+- 只扫描 `audits/` 和 `triage/` 中除 `latest.json` 外的不可变历史；
+- 每个类型至少保留最新 20 条；
+- 只有超过 30 天的历史才可能成为候选；
+- Diagnosis 默认完全排除，必须显式使用 `--include-diagnoses`；
+- 被保留的 Triage 或 Verification latest 引用的 Diagnosis 即使 opt-in 也不会删除；
+- Candidate、TestSpec、正式测试、snapshot、config、permissions、verification latest、各类型 `latest.json` 和报告不在 v0.7.0 清理范围；
+- 损坏或无法理解的 JSON、符号链接、硬链接、重复 inode 和非规则文件默认保护，而不是为释放空间冒险删除。
+
+可以调整年龄、保留数量或受控历史容量目标：
+
+```bash
+test-assistant clean --path . \
+  --older-than-days 60 \
+  --keep-latest 50
+
+test-assistant clean --path . \
+  --max-total-mib 100
+
+test-assistant clean --path . \
+  --include-diagnoses \
+  --max-total-mib 100
+```
+
+`--max-total-mib` 会在年龄、最少保留数量、引用和资产保护仍然有效的前提下，从最旧记录开始增加候选；它不是强制删除到指定容量的承诺。文本预览显示候选数、可回收字节、相对路径和原因；`--json` 适合保存和审阅计划。
+
+真正清理必须同时使用 `--apply` 并在提示后确认：
+
+```bash
+test-assistant clean --path . --apply
+```
+
+执行器会重新校验候选的路径、inode、大小和 mtime，防止预览后文件被替换。候选先原子移动到 `.autotest/.trash/<operation-id>/`；移动失败会回滚已经移动的文件，全部移动成功后才删除隔离区。取消确认不会修改任何 bytes。扫描、路径或事务错误返回退出码 `2`。
+
+高频项目可以每周或每月保存一次 JSON dry-run，根据候选数量和可回收空间决定是否人工 apply。不要用系统定时任务直接删除 `.autotest` 子目录，也不要绕过引用保护手工批量删除 Diagnosis。
+
+## 17. 检查试用产生的变化
 
 完整流程后执行：
 
@@ -623,14 +722,14 @@ find .autotest -maxdepth 5 -type f -print
 python -m pytest -q
 ```
 
-## 17. 更新或卸载本地 wheel
+## 18. 更新或卸载本地 wheel
 
 工具重新构建后，在目标项目虚拟环境更新：
 
 ```bash
 python -m pip install \
   --upgrade \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.6.2-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.7.0-py3-none-any.whl
 ```
 
 卸载 CLI：
@@ -641,7 +740,7 @@ python -m pip uninstall test-assistant
 
 卸载 Python 包不会删除目标项目中的 `.autotest/`。该目录包含测试、计划和诊断记录，删除前应先检查并备份需要保留的内容。
 
-## 18. 常见问题
+## 19. 常见问题
 
 ### wheel 无法安装，提示 Python 版本不兼容
 
@@ -700,7 +799,11 @@ python -m pytest path/to/test_file.py --collect-only -q
 
 不是。仓库自动化测试使用 fake LLM，避免网络和模型波动。真实模型只作为显式试用或 smoke test。
 
-## 19. 当前限制
+### `.autotest` 为什么持续增长
+
+运行历史用于审计、恢复 latest 和保护被引用诊断，因此不会自动删除。先运行 `test-assistant clean --path . --json` 检查候选和保护原因，再决定是否使用 `--apply`。如果没有候选，通常是记录不足 30 天、仍在最新 20 条内、Diagnosis 未 opt-in，或记录仍被引用。
+
+## 20. 当前限制
 
 - `triage` 只支持 Python/pytest，不调用 LLM，也不自动修复；
 - 只有当前源码与历史等明确证据确认能力已移除时，才可判旧测试为 `TEST_DEFECT`；
@@ -713,6 +816,7 @@ python -m pytest path/to/test_file.py --collect-only -q
 - 当前执行器还不能显式选择目标项目的其他 Python 解释器；
 - 没有已批准强契约时，稳定失败通常返回 `INCONCLUSIVE`；
 - 当前使用版本化 JSON，尚未引入 SQLite 或远程服务；
+- 不提供后台自动清理或容量守护进程；
 - 工具不会自动修复产品源码，也不会自动批准 TestSpec 或 diff。
 
 内部模块和 `.autotest/` 结构参见 [项目结构文档](project-structure.md)。历史设计与实施计划位于 `docs/plans/`。

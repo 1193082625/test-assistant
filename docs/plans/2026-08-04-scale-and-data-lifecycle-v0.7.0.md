@@ -9,6 +9,8 @@
 **Tech Stack:** Python 3.13+、pytest、resource/tracemalloc、JSON schema migration、Poetry extras。
 
 > 本文件保留版本范围摘要。可直接执行的逐任务计划见 `2026-08-05-scale-data-lifecycle-v0.7.0.md`。
+>
+> 状态（2026-08-05）：实现与用户文档已完成；性能证据未超过预算，因此优化任务标记为 `not needed`。等待完整发布与真实项目只读验收后创建 `v0.7.0` Tag。
 
 ---
 
@@ -54,6 +56,14 @@
 ### Task 7: 发布验收
 
 运行全量测试、性能基线、`compileall`、构建和三种 wheel 安装（base、llm、quality）。在大型 fixture 上验证 Ctrl-C、临时文件清理和磁盘增长上限。
+
+### 已交付的用户操作边界
+
+- 普通读取把 v1 记录在内存中升级为 v2，不自动写盘；
+- `migrate` 与 `clean` 默认 dry-run，apply 需要人工确认；
+- `.autotest` 不进行后台自动清理，默认每类保留最新 20 条且只选择超过 30 天的 Audit/Triage 历史；
+- Diagnosis 必须显式 opt-in，被引用诊断和用户资产始终保护；
+- base wheel 只包含确定性能力，缺少 LLM extra 时返回 `llm_extra_required`/退出码 2。
 
 ## 完成标准
 

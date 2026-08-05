@@ -7,7 +7,7 @@ def test_root_cli_exposes_version():
     result = CliRunner().invoke(cli, ["--version"])
 
     assert result.exit_code == 0, result.output
-    assert result.output == "test-assistant, version 0.6.2\n"
+    assert result.output == "test-assistant, version 0.7.0\n"
 
 
 def test_root_help_exposes_doctor_command():
@@ -15,3 +15,11 @@ def test_root_help_exposes_doctor_command():
 
     assert result.exit_code == 0, result.output
     assert "doctor" in result.output
+
+
+def test_root_help_exposes_data_lifecycle_commands():
+    result = CliRunner().invoke(cli, ["--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "migrate" in result.output
+    assert "clean" in result.output

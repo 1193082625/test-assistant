@@ -102,7 +102,7 @@ jobs:
           fi
           mkdir -p "$smoke_project"
           echo 'value = 1' > "$smoke_project/app.py"
-          "$smoke_venv/bin/test-assistant" --version | grep '0.6.2'
+          "$smoke_venv/bin/test-assistant" --version | grep '0.7.0'
           "$smoke_venv/bin/test-assistant" doctor --help
           "$smoke_venv/bin/test-assistant" triage --help
           "$smoke_venv/bin/test-assistant" plan list --help

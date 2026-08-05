@@ -1,6 +1,6 @@
 [project]
 name = "test-assistant"
-version = "0.6.2"
+version = "0.7.0"
 description = "LLM 驱动的智能测试工具"
 authors = [
     {name = "xibao",email = "1193082625@qq.com"}

@@ -2,7 +2,7 @@
 
 `test-assistant` 是一个面向 Python/pytest 项目的本地智能测试 CLI。
 
-当前 `v0.6.2` 提供 TestSpec 审批与候选门禁、pytest 失败分诊、只读质量审计、环境诊断，以及 Ubuntu/macOS wheel 和特殊路径兼容性证据。
+当前 `v0.7.0` 在可信测试闭环、失败分诊、只读质量审计和环境诊断之上，增加大型仓库性能基线、`.autotest` schema v2 迁移、安全历史清理以及最小化可选依赖安装。
 
 ## 当前能力
 
@@ -22,6 +22,10 @@
 - 通过 `audit` 映射源码符号覆盖缺口，并汇总 Ruff 与 mypy findings；
 - 支持显式覆盖率/质量阈值、`--changed-only` 和 Markdown Audit 报告。
 - 通过 `doctor` 只读检查 Python、pytest、Git、pytest-cov、coverage、Ruff 和 mypy，并支持版本化 JSON 输出。
+- 兼容读取 schema v1 运行记录，在内存中升级为 schema v2，正常读取不改写磁盘；
+- 通过 `migrate` 预览或显式迁移受控记录，并可修复损坏的 latest；
+- 通过 `clean` 预览或显式清理受控历史，默认保护 Diagnosis 和用户资产；
+- 提供 base、`[llm]`、`[quality]` 和 `[all]` 安装组合。
 
 ## 安全原则
 
@@ -52,13 +56,29 @@ TestSpec 人工审批
 ```bash
 git clone <repository-url>
 cd test-assistant
-poetry install
+poetry install --all-extras
 poetry run test-assistant --help
+```
+
+构建 wheel 后，可按用途安装：
+
+```bash
+# base：确定性命令，只强制依赖 Click 和 PyYAML
+python -m pip install dist/test_assistant-0.7.0-py3-none-any.whl
+
+# LLM 规划、生成和 legacy graph run
+python -m pip install 'dist/test_assistant-0.7.0-py3-none-any.whl[llm]'
+
+# coverage、Ruff、mypy adapters
+python -m pip install 'dist/test_assistant-0.7.0-py3-none-any.whl[quality]'
+
+# 全部能力
+python -m pip install 'dist/test_assistant-0.7.0-py3-none-any.whl[all]'
 ```
 
 ## 配置 LLM
 
-`plan propose` 和 `generate` 需要调用 LLM：
+`plan propose` 和 `generate` 需要调用 LLM；legacy graph `run` 也属于 `[llm]` 安装范围：
 
 ```bash
 export DEEPSEEK_API_KEY="your-api-key"
@@ -67,7 +87,7 @@ export DEEPSEEK_BASE_URL="https://your-api-endpoint"
 
 `DEEPSEEK_BASE_URL` 应指向所使用的 OpenAI 兼容服务地址。不要把密钥提交到 Git。
 
-`init`、`inspect`、`run`、`triage`、`audit`、`doctor`、`verify`、`status`、`diagnose` 和 `report` 不调用 LLM。
+`init`、`inspect`、`triage`、`audit`、`doctor`、`verify`、`status`、`diagnose`、`report`、`migrate` 和 `clean` 不调用 LLM。缺少 `[llm]` 时，`plan propose`、`generate` 和 `run` 返回退出码 `2` 与稳定原因 `llm_extra_required`，不会联网或自动安装依赖。
 
 ## 环境诊断
 
@@ -81,7 +101,7 @@ test-assistant doctor --path . --timeout 10
 
 Doctor 只执行固定的版本探测命令，不联网、不安装依赖、不运行测试、lint 或类型检查，也不写入目标项目。文本输出供人工排障；`--json` 输出 `schema_version: 1` 的纯 JSON。
 
-退出码为：`0` 表示核心环境健康（允许 Git 或可选 adapter 缺失），`1` 表示核心 Python/pytest 环境不兼容，`2` 表示参数或基础设施错误。v0.6.2 认证 Ubuntu/macOS 上的 Python 3.13；Windows 不在支持范围，Python 3.14 仅做非阻塞探测。
+退出码为：`0` 表示核心环境健康（允许 Git 或可选 adapter 缺失），`1` 表示核心 Python/pytest 环境不兼容，`2` 表示参数或基础设施错误。v0.7.0 认证 Ubuntu/macOS 上的 Python 3.13；Windows 不在支持范围，Python 3.14 仅做非阻塞探测。
 
 ## 只读质量审计
 
@@ -241,6 +261,33 @@ poetry run test-assistant triage --path /path/to/demo-project \
 - `verify`：验证一个已批准 TestSpec 对应的精确 node；
 - `triage`：分析已有 pytest 套件，不要求或修改 TestSpec。
 
+## 记录迁移与历史清理
+
+v0.7.0 的 Diagnosis、Triage、Audit、Verification 和 Git permission 运行记录使用 schema v2，并带有稳定的 `record_type`。读取旧 schema v1 记录时只在内存中迁移，正常的 `status`、`report` 等读取不会改写原文件。未知未来版本、错误记录类型和损坏 JSON 会明确失败；Audit、Triage、Diagnosis 的 `latest.json` 损坏时，可只读回退到最近的有效历史。
+
+显式查看或应用磁盘迁移：
+
+```bash
+test-assistant migrate --path .
+test-assistant migrate --path . --json
+test-assistant migrate --path . --apply
+```
+
+默认仅预览。`--apply` 会再次要求人工确认；执行前完整备份受控数据，全部写入成功后才删除备份，失败则恢复原始 bytes。未知未来 schema 会阻止 apply。
+
+`.autotest` **不会在后台自动清理**。高频运行会持续增加 `audits/`、`triage/` 和 `diagnoses/` 历史，应先定期预览：
+
+```bash
+test-assistant clean --path .
+test-assistant clean --path . --json
+test-assistant clean --path . --max-total-mib 100
+test-assistant clean --path . --apply
+```
+
+默认规则是每类至少保留最新 20 条，并且只把超过 30 天的 Audit/Triage 历史列为候选。`--max-total-mib` 会在相同保护边界内从最旧记录开始控制容量。Diagnosis 默认不清理，只有显式传入 `--include-diagnoses` 才可能成为候选；被保留 Triage 或 Verification 引用的 Diagnosis 仍受保护。
+
+Candidate、TestSpec、正式测试、snapshot、config、permissions、verification latest 和各类型 `latest.json` 不会被清理。损坏记录、符号链接、硬链接、非规则文件和重复 inode 默认保护。实际删除必须同时使用 `--apply` 并人工确认；文件先移动到项目内 `.autotest/.trash/<operation-id>/`，移动失败会回滚，成功后才删除隔离区。建议先保存 `--json` 预览并核对候选，再执行 apply。
+
 ## 目标项目工作区
 
 初始化和后续命令会维护：
@@ -257,6 +304,7 @@ poetry run test-assistant triage --path /path/to/demo-project \
 ├── triage/                 版本化套件分诊记录与 latest.json
 ├── audits/                 版本化覆盖率/质量审计记录与 latest.json
 ├── verification/           最近一次验证状态
+├── .trash/                 clean 执行期间的临时隔离区
 └── reports/                Markdown 报告
 ```
 
@@ -266,8 +314,9 @@ poetry run test-assistant triage --path /path/to/demo-project \
 - Web Dashboard 和 watch 尚未实现；
 - Vitest 执行器不属于当前 TestSpec 生成闭环；
 - 没有已批准强契约时，稳定失败通常返回 `INCONCLUSIVE`；
-- v0.6.2 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
-- 当前使用版本化 JSON，尚未引入 SQLite 或远程服务；
+- v0.7.0 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
+- `.autotest` 不做后台或定时自动清理，清理必须显式预览和确认；
+- 当前使用 schema v2 版本化 JSON，尚未引入 SQLite 或远程服务；
 - 真实 LLM 验证是显式 smoke test，不属于默认自动化测试。
 
 ## 文档
