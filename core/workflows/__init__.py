@@ -16,6 +16,7 @@ from .triage import (
 from .audit import run_audit
 from core.models import TriageResult
 from .doctor import run_doctor
+from .migrate import execute_migration, plan_migration
 
 __all__ = [
     "VerificationResult",
@@ -32,4 +33,6 @@ __all__ = [
     "TriageResult",
     "triage_pytest_suite",
     "run_doctor",
+    "plan_migration",
+    "execute_migration",
 ]

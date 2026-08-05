@@ -82,8 +82,16 @@ class GitPermissionRepository:
         self._atomic_write(payload)
 
     def is_granted(self) -> bool:
-        if not self.path.is_file():
+        payload = self.load()
+        if payload is None:
             return False
+        entry = payload["git_history"]
+        current = git_repository_identity(self.project_root)
+        return current is not None and current == entry["repository_identity"]
+
+    def load(self) -> dict[str, object] | None:
+        if not self.path.is_file():
+            return None
         try:
             payload = _SCHEMA_REGISTRY.load(
                 self.path,
@@ -103,8 +111,7 @@ class GitPermissionRepository:
             or not isinstance(entry.get("repository_identity"), str)
         ):
             raise ValueError("不支持的 Git 授权记录格式")
-        current = git_repository_identity(self.project_root)
-        return current is not None and current == entry["repository_identity"]
+        return payload
 
     def _atomic_write(self, payload: dict[str, object]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

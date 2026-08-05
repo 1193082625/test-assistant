@@ -73,6 +73,12 @@ from .environment import (
     EnvironmentCheckState,
 )
 from .performance import BenchmarkResult
+from .migration import (
+    MigrationAction,
+    MigrationItem,
+    MigrationPlan,
+    MigrationResult,
+)
 
 __all__ = [
     "ContractMigrationEvidence",
@@ -130,4 +136,8 @@ __all__ = [
     "EnvironmentCheck",
     "EnvironmentCheckState",
     "BenchmarkResult",
+    "MigrationAction",
+    "MigrationItem",
+    "MigrationPlan",
+    "MigrationResult",
 ]
