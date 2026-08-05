@@ -1,8 +1,8 @@
 # test-assistant 项目结构
 
-> 当前版本：`v0.6.0`
+> 当前版本：`v0.6.1`
 >
-> 更新日期：2026-08-04
+> 更新日期：2026-08-05
 >
 > 适用范围：当前仓库中的 Python/pytest 可信 CLI
 
@@ -39,6 +39,7 @@ cli/
     ├── verify.py           验证精确 pytest node 并触发诊断
     ├── triage.py           分诊已有 pytest 套件并保存运行记录
     ├── audit.py            只读执行 coverage、Ruff 与 mypy 审计
+    ├── doctor.py           只读展示环境诊断文本或版本化 JSON
     ├── run.py              执行基于快照的增量测试流程
     ├── status.py           展示最近一次验证健康状态
     ├── diagnose.py         解释已保存的 Diagnosis JSON
@@ -56,7 +57,7 @@ core/
 ├── planners/               从符号与契约规划 TestSpec
 ├── generators/             从已批准 TestSpec 生成候选测试源码
 ├── validators/             静态、导入、收集、Runner 和隔离门禁
-├── executors/              pytest/Vitest 执行器及统一 ExecutionReport
+├── executors/              pytest/Vitest 执行器、统一报告及安全环境探测
 ├── diagnosticians/         预检、失败聚类、重复性判断和证据归因
 ├── repositories/           TestSpec、候选、诊断、triage 和验证状态持久化
 ├── workflows/              候选提交、验证和已有套件分诊编排
@@ -73,6 +74,7 @@ core/
 | `models/test_spec.py` | TestSpec、预期证据、审批状态和强度判断 |
 | `models/diagnosis.py` | 五类诊断、置信度、证据、位置和建议动作 |
 | `models/triage.py` | pytest issue、失败簇和 suite triage 结果 |
+| `models/environment.py` | Doctor 单项状态、汇总状态和 schema v1 JSON 契约 |
 | `analyzers/source.py` | Python 符号、可测性、导入关系和测试索引 |
 | `analyzers/contract.py` | docstring、类型提示、Schema 和已有测试证据 |
 | `analyzers/contract_migration.py` | 从失败测试、Pydantic 错误和 warning 提取旧契约候选 |
@@ -84,6 +86,8 @@ core/
 | `workflows/candidate.py` | 候选生成、隔离验证、diff 和正式提交 |
 | `workflows/verification.py` | 门禁、三次精确复跑、归因和记录保存 |
 | `workflows/triage.py` | 已有 suite 聚类、代表 node 复跑和固定优先级归因 |
+| `workflows/doctor.py` | 聚合 Python、pytest、Git 和可选 adapter 的只读环境事实 |
+| `executors/environment_probe.py` | 以参数数组、有限超时和有限输出执行版本探测 |
 | `diagnosticians/clustering.py` | 去除临时路径、地址和时间戳的稳定失败指纹 |
 | `diagnosticians/attribution.py` | TestSpec、契约、门禁、位置和执行证据归因 |
 | `repositories/candidate.py` | 候选隔离路径、摘要、diff 和并发安全提交 |
@@ -144,6 +148,18 @@ flowchart LR
     F --> G["diagnoses + triage/latest.json"]
 ```
 
+Doctor 使用不写入目标项目的独立流程：
+
+```mermaid
+flowchart LR
+    A["doctor 参数"] --> B["当前 Python 事实"]
+    A --> C["受控版本探测"]
+    C --> D["pytest / Git / 可选 adapters"]
+    B --> E["DoctorResult schema v1"]
+    D --> E
+    E --> F["文本或纯 JSON + 稳定退出码"]
+```
+
 ## 目标项目中的 `.autotest`
 
 ```text
@@ -177,6 +193,7 @@ flowchart LR
 - 正式测试写入前必须通过门禁并由用户确认 diff。
 - `verify` 只执行用户指定的精确 pytest node。
 - `triage` 不需要 TestSpec，不调用 LLM，也不修改源码、测试、审批状态或 snapshot。
+- `doctor` 不联网、不安装或执行项目工具任务，也不写源码、测试、Git、snapshot 或 `.autotest`。
 - 未经仓库级明确授权，`triage` 不读取 Git 历史；授权后仍禁止网络访问和 Git 修改。
 - `PRODUCT_DEFECT` 需要已批准强契约、通过的测试门禁和同环境稳定失败。
 - 证据不足时返回 `INCONCLUSIVE`，不以高置信度猜测。
@@ -188,6 +205,11 @@ flowchart LR
 
 ```text
 tests/test_cli_end_to_end.py           完整 CLI 生命周期
+tests/test_v061_release_acceptance.py Doctor 真实子进程、只读与退出码验收
+tests/test_environment_model.py       Doctor schema v1 领域契约
+tests/test_environment_probe.py       受控命令、超时和输出边界
+tests/test_doctor_workflow.py          环境聚合、降级与汇总状态
+tests/test_cli_doctor.py               文本/JSON 输出、参数和退出码
 tests/test_cli_plan_propose.py         TestSpec 提议入口
 tests/test_cli_generate.py             审批、diff 与提交
 tests/test_cli_verify.py               真实 pytest 三次验证

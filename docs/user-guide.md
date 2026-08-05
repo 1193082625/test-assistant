@@ -1,8 +1,8 @@
 # test-assistant 真实项目使用指南
 
-> 当前版本：`v0.6.0`
+> 当前版本：`v0.6.1`
 >
-> 更新日期：2026-08-04
+> 更新日期：2026-08-05
 >
 > 当前主流程：Python 3.13 + pytest
 
@@ -10,6 +10,7 @@
 
 ```text
 安装
+→ doctor
 → init
 → inspect
 → triage（已有套件，可独立使用）
@@ -62,14 +63,14 @@ poetry build
 成功后生成：
 
 ```text
-dist/test_assistant-0.6.0-py3-none-any.whl
-dist/test_assistant-0.6.0.tar.gz
+dist/test_assistant-0.6.1-py3-none-any.whl
+dist/test_assistant-0.6.1.tar.gz
 ```
 
 记下 wheel 的绝对路径，例如：
 
 ```text
-/absolute/path/to/test-assistant/dist/test_assistant-0.6.0-py3-none-any.whl
+/absolute/path/to/test-assistant/dist/test_assistant-0.6.1-py3-none-any.whl
 ```
 
 `poetry build` 只生成本地安装包，不会上传或发布。
@@ -133,7 +134,7 @@ python -m pip uninstall -y test-assistant
 
 ```bash
 python -m pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.6.0-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.6.1-py3-none-any.whl
 ```
 
 强制重装
@@ -141,7 +142,7 @@ python -m pip install \
  python -m pip install \
   --force-reinstall \
   --no-deps \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.6.0-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.6.1-py3-none-any.whl
 ```
 
 验证：
@@ -166,7 +167,7 @@ poetry run python -m pytest --version
 
 ```bash
 poetry run pip install \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.6.0-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.6.1-py3-none-any.whl
 ```
 
 验证：
@@ -179,6 +180,28 @@ poetry run python -m pytest -q
 这种安装方式适合本地试用，不会自动把 `test-assistant` 写入目标项目的 `pyproject.toml`。重新创建 Poetry 环境后需要重新安装。
 
 后续示例使用已经激活的普通 venv，命令写作 `test-assistant`。如果目标项目使用 Poetry，请在每条命令前加 `poetry run`。
+
+### v0.6.1 环境诊断
+
+安装后、初始化目标项目之前，建议先确认 CLI 实际运行环境：
+
+```bash
+test-assistant doctor --path .
+test-assistant doctor --path . --json
+test-assistant doctor --path . --timeout 10
+```
+
+Doctor 报告 test-assistant 版本、当前 Python 实现与解释器、平台、pytest、Git/worktree，以及 pytest-cov、coverage、Ruff 和 mypy 的状态。`--json` 输出 `schema_version` 为 `1` 的纯 JSON，适合 CI 消费。
+
+Doctor 是只读命令：不读取 `.env` 或 Git 历史，不联网、不安装依赖、不运行测试/lint/type-check，也不创建或修改 `.autotest`。Git、非 Git worktree 或可选 adapter 缺失只会显示能力降级。
+
+退出码含义：
+
+- `0`：核心环境健康；
+- `1`：核心 Python 或 pytest 环境不兼容；
+- `2`：路径、探测或内部基础设施错误。
+
+v0.6.1 只认证 Python 3.13。Ubuntu/macOS wheel 矩阵、特殊路径系统矩阵和 Python 3.14 认证属于 v0.6.2 或后续版本。
 
 ## 5. 配置 LLM
 
@@ -607,7 +630,7 @@ python -m pytest -q
 ```bash
 python -m pip install \
   --upgrade \
-  /absolute/path/to/test-assistant/dist/test_assistant-0.6.0-py3-none-any.whl
+  /absolute/path/to/test-assistant/dist/test_assistant-0.6.1-py3-none-any.whl
 ```
 
 卸载 CLI：

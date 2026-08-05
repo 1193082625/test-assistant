@@ -2,7 +2,7 @@
 
 `test-assistant` 是一个面向 Python/pytest 项目的本地智能测试 CLI。
 
-当前 `v0.6.0` 提供三条相互独立的可信闭环：TestSpec 审批与候选门禁、pytest 失败分诊，以及只读的 coverage/Ruff/mypy 质量审计。
+当前 `v0.6.1` 提供 TestSpec 审批与候选门禁、pytest 失败分诊、只读质量审计，以及运行前环境诊断。
 
 ## 当前能力
 
@@ -21,6 +21,7 @@
 - 原子保存 TestSpec、候选、验证状态、脱敏诊断和 triage 运行记录。
 - 通过 `audit` 映射源码符号覆盖缺口，并汇总 Ruff 与 mypy findings；
 - 支持显式覆盖率/质量阈值、`--changed-only` 和 Markdown Audit 报告。
+- 通过 `doctor` 只读检查 Python、pytest、Git、pytest-cov、coverage、Ruff 和 mypy，并支持版本化 JSON 输出。
 
 ## 安全原则
 
@@ -66,7 +67,21 @@ export DEEPSEEK_BASE_URL="https://your-api-endpoint"
 
 `DEEPSEEK_BASE_URL` 应指向所使用的 OpenAI 兼容服务地址。不要把密钥提交到 Git。
 
-`init`、`inspect`、`run`、`triage`、`audit`、`verify`、`status`、`diagnose` 和 `report` 不调用 LLM。
+`init`、`inspect`、`run`、`triage`、`audit`、`doctor`、`verify`、`status`、`diagnose` 和 `report` 不调用 LLM。
+
+## 环境诊断
+
+在运行 `triage`、`audit` 或 `verify` 前，可以检查 CLI 实际使用的解释器和工具：
+
+```bash
+test-assistant doctor --path .
+test-assistant doctor --path . --json
+test-assistant doctor --path . --timeout 10
+```
+
+Doctor 只执行固定的版本探测命令，不联网、不安装依赖、不运行测试、lint 或类型检查，也不写入目标项目。文本输出供人工排障；`--json` 输出 `schema_version: 1` 的纯 JSON。
+
+退出码为：`0` 表示核心环境健康（允许 Git 或可选 adapter 缺失），`1` 表示核心 Python/pytest 环境不兼容，`2` 表示参数或基础设施错误。v0.6.1 认证 Python 3.13；其他 Python 版本会明确报告为不兼容。
 
 ## 只读质量审计
 
@@ -251,7 +266,7 @@ poetry run test-assistant triage --path /path/to/demo-project \
 - Web Dashboard 和 watch 尚未实现；
 - Vitest 执行器不属于当前 TestSpec 生成闭环；
 - 没有已批准强契约时，稳定失败通常返回 `INCONCLUSIVE`；
-- v0.6.0 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
+- v0.6.1 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
 - 当前使用版本化 JSON，尚未引入 SQLite 或远程服务；
 - 真实 LLM 验证是显式 smoke test，不属于默认自动化测试。
 
