@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.13、Click、pytest、GitHub Actions、JSON、Markdown。
 
+**完成状态（2026-08-05）：** 全量 824 项测试、构建、产物内容检查和本地干净 wheel smoke 通过；同一 v0.6.2 wheel 已在 Ubuntu/macOS Python 3.13 GitHub Actions matrix 中通过，`v0.6.2` Tag 已发布。Python 3.14 probe 保持非阻塞，Windows 保持 unsupported。
+
 ---
 
 ### Task 1: 固定特殊路径与只读边界
@@ -94,3 +96,11 @@
 - `docs/compatibility.md` is generated from a validated manifest and CI can detect drift.
 - Windows and Python 3.14 are not advertised as supported.
 - Full tests, packaging checks and clean-wheel smoke pass without changing the target fixture.
+
+## Release evidence
+
+- Source and compatibility tests: `824 passed`.
+- Package metadata: `test-assistant 0.6.2`, Python `>=3.13,<3.14`.
+- Clean local wheel smoke: text/JSON Doctor healthy; fixture paths and bytes unchanged.
+- GitHub Actions: Ubuntu and macOS consumed the same uploaded wheel artifact successfully.
+- Published tag: `v0.6.2`.

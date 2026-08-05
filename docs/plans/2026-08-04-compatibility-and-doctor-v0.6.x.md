@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.13+、Click、pytest、GitHub Actions、JSON。
 
-**当前进度（2026-08-05）：** `v0.6.1` 已完成环境模型、安全探测器、只读工作流、CLI、干净 wheel 和 `fitstyle-backend` 验收。`v0.6.2` 已实现 Ubuntu/macOS 同一 wheel CI、特殊路径矩阵、Python 3.14 非阻塞探测和生成式兼容表，平台认证以 CI 绿色结果为准。
+**完成状态（2026-08-05）：** `v0.6.1` 已完成环境模型、安全探测器、只读工作流、CLI、干净 wheel 和 `fitstyle-backend` 验收。`v0.6.2` 已通过 Ubuntu/macOS Python 3.13 同一 wheel CI，完成特殊路径矩阵、Python 3.14 非阻塞探测和生成式兼容表，并已发布 `v0.6.2` Tag。Windows 与 Python 3.14 未认证。
 
 ---
 
@@ -36,7 +36,7 @@
 3. 退出码：健康或部分可选工具缺失为 `0`；核心 Python/pytest 不兼容为 `1`；参数/基础设施错误为 `2`。
 4. 运行相关测试并提交 `feat: add read-only doctor command`。
 
-### Task 3: 建立兼容 CI 矩阵（v0.6.2 已实现，等待 CI 证据）
+### Task 3: 建立兼容 CI 矩阵（v0.6.2 已完成）
 
 **Files:** Modify `.github/workflows/ci.yml`; create `tests/test_installed_cli_smoke.py`（如 shell smoke 无法提供足够断言）。
 

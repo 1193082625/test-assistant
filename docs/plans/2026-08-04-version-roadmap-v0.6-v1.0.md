@@ -1,7 +1,7 @@
 # test-assistant v0.6～v1.0 统一版本路线图
 
 > 状态：当前权威版本规划  
-> 基线：`v0.6.1` 已完成 Doctor、干净 wheel 和 `fitstyle-backend` 只读验收；`v0.6.2` 正在建立跨平台兼容证据
+> 基线：`v0.6.2` 已完成并通过 Ubuntu/macOS 同一 wheel 兼容矩阵
 > 制定日期：2026-08-04
 
 ## 1. 规划原则
@@ -18,7 +18,9 @@
 
 `v0.6.1` 已实现只读 `doctor`、schema v1 环境 JSON 和稳定退出码，并完成 Python 3.13 干净 wheel 安装以及 `fitstyle-backend` Doctor/coverage Audit 只读验收。
 
-`v0.6.2` 增加同一 wheel 的 Ubuntu/macOS 消费矩阵、特殊路径系统测试、Python 3.14 非阻塞探测和自动兼容表。后续仍需性能/内存基线、持久化数据生命周期和正式安全发布门。
+`v0.6.2` 已通过同一 wheel 的 Ubuntu/macOS Python 3.13 消费矩阵，并交付特殊路径系统测试、Python 3.14 非阻塞探测和自动兼容表。`v0.6.2` Tag 已发布；Windows 与 Python 3.14 仍不在支持范围。
+
+下一阶段为 `v0.7.0`：建立大型仓库性能/内存基线、统一 `.autotest` schema 迁移与恢复、显式数据清理，以及基础/LLM/quality 可选依赖拆分。
 
 ## 3. 版本边界
 
