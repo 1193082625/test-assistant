@@ -1,6 +1,8 @@
 import json
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -15,12 +17,58 @@ from core.models import (
 )
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 class FakeLLM:
     def __init__(self, response):
         self.response = response
 
     def invoke(self, prompt):
         return self.response
+
+
+def test_cli_doctor_runs_in_real_subprocess(tmp_path):
+    project = tmp_path / "doctor project 中文"
+    project.mkdir()
+    source = project / "example.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+
+    environment = os.environ.copy()
+    existing_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        part
+        for part in (
+            str(PROJECT_ROOT),
+            existing_pythonpath,
+        )
+        if part
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "cli.main",
+            "doctor",
+            "--path",
+            str(project),
+            "--json",
+        ],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=environment,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["status"] == "healthy"
+    assert payload["project_path"] == str(project.resolve())
+    assert source.read_text(encoding="utf-8") == "value = 1\n"
+    assert not (project / ".autotest").exists()
 
 
 def test_cli_runs_propose_approve_generate_verify_flow(
