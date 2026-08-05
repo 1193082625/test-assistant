@@ -72,6 +72,7 @@ from .environment import (
     EnvironmentCheck,
     EnvironmentCheckState,
 )
+from .performance import BenchmarkResult
 
 __all__ = [
     "ContractMigrationEvidence",
@@ -128,4 +129,5 @@ __all__ = [
     "DoctorStatus",
     "EnvironmentCheck",
     "EnvironmentCheckState",
+    "BenchmarkResult",
 ]
