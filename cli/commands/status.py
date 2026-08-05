@@ -5,8 +5,8 @@ from pathlib import Path
 import click
 
 
-from .diagnose import load_diagnosis
-from core.repositories import VerificationStateRepository
+from core.models import Diagnosis
+from core.repositories import DiagnosisRepository, VerificationStateRepository
 
 @click.command()
 @click.option(
@@ -51,17 +51,23 @@ def status(path: Path) -> None:
         )
         return
 
-    latest_path = (
-        path.resolve()
-        / ".autotest"
-        / "diagnoses"
-        / "latest.json"
-    )
-    if not latest_path.is_file():
+    diagnosis_repository = DiagnosisRepository(path)
+    try:
+        latest_record = diagnosis_repository.load_latest_record()
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        raise click.ClickException(
+            f"无法读取诊断记录: {error}"
+        ) from error
+    if latest_record is None:
         click.echo("状态: 未知（暂无诊断记录）")
         return
 
-    diagnosis = load_diagnosis(latest_path)
+    diagnosis = Diagnosis.from_dict(latest_record.payload["diagnosis"])
+    if latest_record.recovered:
+        click.echo(
+            "警告: latest 记录不可用，已只读恢复自: "
+            f"{latest_record.source_path}"
+        )
     if diagnosis.category.value == "inconclusive":
         health = "需要确认"
     else:

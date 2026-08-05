@@ -33,13 +33,19 @@ def report(path: Path, output: Path | None, audit_report: bool) -> None:
     """生成测试报告"""
     repository = AuditRepository(path) if audit_report else DiagnosisRepository(path)
     try:
-        record = repository.load_latest()
+        latest_record = repository.load_latest_record()
     except (KeyError, OSError, TypeError, ValueError) as error:
         raise click.ClickException(
             f"无法读取{' Audit' if audit_report else '诊断'}记录: {error}"
         ) from error
-    if record is None:
+    if latest_record is None:
         raise click.ClickException("暂无 Audit 记录" if audit_report else "暂无诊断记录")
+    record = latest_record.payload
+    if latest_record.recovered:
+        click.echo(
+            "警告: latest 记录不可用，已只读恢复自: "
+            f"{latest_record.source_path}"
+        )
 
     output_path = output or (
         path.resolve()

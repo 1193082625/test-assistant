@@ -8,6 +8,7 @@ import tempfile
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 
@@ -21,6 +22,15 @@ class LoadedRecord:
     payload: dict[str, object]
     source_version: int
     migrated: bool
+
+
+@dataclass(frozen=True)
+class LatestRecord:
+    """A latest payload and the path it was safely loaded from."""
+
+    payload: dict[str, object]
+    recovered: bool
+    source_path: Path
 
 
 class SchemaRegistry:
@@ -81,14 +91,20 @@ class SchemaRegistry:
             raise ValueError("record payload must be an object")
 
         working = deepcopy(dict(payload))
-        if working.get("record_type") != record_type:
-            raise ValueError("record_type does not match requested type")
-
         source_version = working.get("schema_version")
         _validate_schema_version(source_version)
         target_version = self._current_versions[record_type]
         if source_version > target_version:
             raise ValueError("record uses an unknown future schema_version")
+        stored_record_type = working.get("record_type")
+        if (
+            stored_record_type != record_type
+            and not (
+                stored_record_type is None
+                and source_version < target_version
+            )
+        ):
+            raise ValueError("record_type does not match requested type")
 
         current_version = source_version
         while current_version < target_version:
@@ -154,6 +170,59 @@ def atomic_write_json(
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
+
+
+def load_latest_with_recovery(
+    latest_path: Path,
+    *,
+    load_path: Callable[[Path], dict[str, object]],
+) -> LatestRecord | None:
+    """Read latest or recover the newest valid immutable history in memory."""
+
+    latest_path = Path(latest_path)
+    if not os.path.lexists(latest_path):
+        return None
+    try:
+        if latest_path.is_symlink():
+            raise ValueError("latest record must not be a symbolic link")
+        return LatestRecord(
+            payload=load_path(latest_path),
+            recovered=False,
+            source_path=latest_path,
+        )
+    except (KeyError, OSError, TypeError, ValueError) as latest_error:
+        candidates: list[tuple[float, str, Path, dict[str, object]]] = []
+        try:
+            paths = tuple(latest_path.parent.iterdir())
+        except OSError:
+            raise latest_error
+        for path in paths:
+            if (
+                path == latest_path
+                or path.suffix != ".json"
+                or path.is_symlink()
+                or not path.is_file()
+            ):
+                continue
+            try:
+                payload = load_path(path)
+                created_at = payload.get("created_at")
+                if not isinstance(created_at, str):
+                    continue
+                timestamp = datetime.fromisoformat(created_at)
+                if timestamp.tzinfo is None:
+                    continue
+            except (KeyError, OSError, TypeError, ValueError):
+                continue
+            candidates.append((timestamp.timestamp(), path.name, path, payload))
+        if not candidates:
+            raise latest_error
+        _, _, source_path, payload = max(candidates)
+        return LatestRecord(
+            payload=payload,
+            recovered=True,
+            source_path=source_path,
+        )
 
 
 def _validate_record_type(record_type: object) -> None:

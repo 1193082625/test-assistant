@@ -94,7 +94,8 @@ def test_repository_saves_versioned_record_and_latest(tmp_path):
     assert record_path == tmp_path / ".autotest/triage/run-001.json"
     assert repository.load("run-001") == repository.load_latest()
     record = repository.load_latest()
-    assert record["schema_version"] == 1
+    assert record["schema_version"] == 2
+    assert record["record_type"] == "triage"
     assert record["run_id"] == "run-001"
     assert record["git_sha"] == "abc123"
     assert record["dependency_digest"] == "sha256:deps"

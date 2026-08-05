@@ -6,11 +6,28 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .schema import SchemaRegistry
+
+
+def _migrate_verification_v1(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        **payload,
+        "schema_version": 2,
+        "record_type": "verification",
+    }
+
+
+_SCHEMA_REGISTRY = SchemaRegistry(
+    current_versions={"verification": 2},
+    migrations={("verification", 1): _migrate_verification_v1},
+)
+
 
 class VerificationStateRepository:
     """保存当前健康状态，同时不删除诊断历史。"""
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
+    RECORD_TYPE = "verification"
 
     def __init__(self, project_root: str | Path):
         self.path = (
@@ -33,6 +50,7 @@ class VerificationStateRepository:
             raise ValueError("不支持的验证状态")
         payload = {
             "schema_version": self.SCHEMA_VERSION,
+            "record_type": self.RECORD_TYPE,
             "verified_at": datetime.now(
                 timezone.utc
             ).isoformat(),
@@ -72,13 +90,21 @@ class VerificationStateRepository:
     def load(self) -> dict[str, object] | None:
         if not self.path.is_file():
             return None
-        payload = json.loads(
-            self.path.read_text(encoding="utf-8")
-        )
+        try:
+            payload = _SCHEMA_REGISTRY.load(
+                self.path,
+                record_type=self.RECORD_TYPE,
+            ).payload
+        except ValueError as error:
+            raise ValueError("不支持的验证状态格式") from error
         if (
             not isinstance(payload, dict)
             or payload.get("schema_version")
             != self.SCHEMA_VERSION
+            or payload.get("record_type") != self.RECORD_TYPE
+            or payload.get("status") not in {"passed", "diagnosed"}
+            or not isinstance(payload.get("verified_at"), str)
+            or not isinstance(payload.get("reproduction_command"), str)
         ):
             raise ValueError("不支持的验证状态格式")
         return payload

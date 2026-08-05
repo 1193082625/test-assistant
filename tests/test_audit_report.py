@@ -1,5 +1,8 @@
 """Audit Markdown 报告与 CLI 导出测试。"""
 
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+
 from click.testing import CliRunner
 
 from cli.main import cli
@@ -50,3 +53,37 @@ def test_report_command_exports_latest_audit(tmp_path):
     output = tmp_path / ".autotest/reports/latest-audit.md"
     assert output.is_file()
     assert "Test Assistant Audit 报告" in output.read_text(encoding="utf-8")
+
+
+def test_report_command_discloses_read_only_latest_recovery(tmp_path):
+    repository = AuditRepository(tmp_path)
+    base = AuditResult(
+        run_id="old",
+        status=AuditStatus.PASSED,
+        command=("test-assistant", "audit"),
+        coverage=None,
+        symbols=(),
+        findings=(),
+        tools=(),
+        source_digest="sha256:old",
+    )
+    first = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    repository.save(base, created_at=first)
+    newest = repository.save(
+        replace(base, run_id="new", source_digest="sha256:new"),
+        created_at=first + timedelta(seconds=1),
+    )
+    latest = repository.audit_dir / "latest.json"
+    latest.write_text("{broken", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        ["report", "--path", str(tmp_path), "--audit"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "已只读恢复自" in result.output
+    assert str(newest) in result.output
+    report = tmp_path / ".autotest/reports/latest-audit.md"
+    assert "Run ID：`new`" in report.read_text(encoding="utf-8")
+    assert latest.read_text(encoding="utf-8") == "{broken"

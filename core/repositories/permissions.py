@@ -8,6 +8,22 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .schema import SchemaRegistry
+
+
+def _migrate_permission_v1(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        **payload,
+        "schema_version": 2,
+        "record_type": "git_permission",
+    }
+
+
+_SCHEMA_REGISTRY = SchemaRegistry(
+    current_versions={"git_permission": 2},
+    migrations={("git_permission", 1): _migrate_permission_v1},
+)
+
 
 def git_repository_identity(project_root: str | Path) -> str | None:
     """读取最小仓库身份，不读取提交历史。"""
@@ -39,7 +55,8 @@ def git_repository_identity(project_root: str | Path) -> str | None:
 class GitPermissionRepository:
     """原子保存按仓库身份绑定的本地历史读取授权。"""
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
+    RECORD_TYPE = "git_permission"
 
     def __init__(self, project_root: str | Path) -> None:
         self.project_root = Path(project_root).resolve()
@@ -54,6 +71,7 @@ class GitPermissionRepository:
         )
         payload = {
             "schema_version": self.SCHEMA_VERSION,
+            "record_type": self.RECORD_TYPE,
             "git_history": {
                 "enabled": True,
                 "scope": "local_read_only",
@@ -67,12 +85,18 @@ class GitPermissionRepository:
         if not self.path.is_file():
             return False
         try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as error:
-            raise ValueError("Git 授权记录 JSON 已损坏") from error
+            payload = _SCHEMA_REGISTRY.load(
+                self.path,
+                record_type=self.RECORD_TYPE,
+            ).payload
+        except ValueError as error:
+            if "JSON" in str(error):
+                raise ValueError("Git 授权记录 JSON 已损坏") from error
+            raise ValueError("不支持的 Git 授权记录格式") from error
         entry = payload.get("git_history") if isinstance(payload, dict) else None
         if (
             payload.get("schema_version") != self.SCHEMA_VERSION
+            or payload.get("record_type") != self.RECORD_TYPE
             or not isinstance(entry, dict)
             or entry.get("scope") != "local_read_only"
             or entry.get("enabled") is not True

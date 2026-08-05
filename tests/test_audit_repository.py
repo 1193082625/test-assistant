@@ -59,7 +59,8 @@ def test_repository_saves_versioned_record_and_latest(tmp_path):
     assert repository.load("audit-001") == repository.load_latest()
 
     record = repository.load_latest()
-    assert record["schema_version"] == 1
+    assert record["schema_version"] == 2
+    assert record["record_type"] == "audit"
     assert record["run_id"] == "audit-001"
 
     assert record["created_at"] == "2026-08-04T12:30:00+00:00"

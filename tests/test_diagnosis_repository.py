@@ -82,7 +82,8 @@ def test_repository_saves_versioned_and_latest_record(tmp_path):
     assert saved_path.name.startswith("20260731T000000")
     record = repository.load_latest()
     assert record is not None
-    assert record["schema_version"] == 1
+    assert record["schema_version"] == 2
+    assert record["record_type"] == "diagnosis"
     assert record["git_sha"] == "abc123"
     serialized = str(record)
     assert "super-secret" not in serialized

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from core.executors.base import ExecutionReport
 from core.models import Diagnosis
+from .schema import LatestRecord, SchemaRegistry, load_latest_with_recovery
 
 
 _SECRET_PATTERNS = (
@@ -17,6 +18,20 @@ _SECRET_PATTERNS = (
         r"\s*[:=]\s*([^\s,;]+)"
     ),
     re.compile(r"(?i)bearer\s+[a-z0-9._~+/-]+"),
+)
+
+
+def _migrate_diagnosis_v1(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        **payload,
+        "schema_version": 2,
+        "record_type": "diagnosis",
+    }
+
+
+_SCHEMA_REGISTRY = SchemaRegistry(
+    current_versions={"diagnosis": 2},
+    migrations={("diagnosis", 1): _migrate_diagnosis_v1},
 )
 
 
@@ -121,7 +136,8 @@ def _atomic_write_json(
 class DiagnosisRepository:
     """保存并读取目标项目的诊断历史。"""
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
+    RECORD_TYPE = "diagnosis"
 
     def __init__(self, project_root: str | Path):
         self.project_root = Path(project_root).resolve()
@@ -156,6 +172,7 @@ class DiagnosisRepository:
         timestamp = timestamp.astimezone(timezone.utc)
         record = {
             "schema_version": self.SCHEMA_VERSION,
+            "record_type": self.RECORD_TYPE,
             "created_at": timestamp.isoformat(),
             "git_sha": git_sha,
             "dependency_digest": dependency_digest,
@@ -183,17 +200,32 @@ class DiagnosisRepository:
         return history_path
 
     def load_latest(self) -> dict[str, object] | None:
-        latest_path = self.diagnosis_dir / "latest.json"
-        if not latest_path.is_file():
-            return None
-        data = json.loads(
-            latest_path.read_text(encoding="utf-8")
-        )
+        record = self.load_latest_record()
+        return None if record is None else record.payload
+
+    def _load_path(self, path: Path) -> dict[str, object]:
+        try:
+            data = _SCHEMA_REGISTRY.load(
+                path,
+                record_type=self.RECORD_TYPE,
+            ).payload
+        except ValueError as error:
+            if "JSON" in str(error):
+                raise ValueError("诊断记录 JSON 已损坏") from error
+            raise ValueError("不支持的诊断记录格式") from error
         if (
-            not isinstance(data, dict)
-            or data.get("schema_version")
-            != self.SCHEMA_VERSION
+            data.get("schema_version") != self.SCHEMA_VERSION
+            or data.get("record_type") != self.RECORD_TYPE
+            or not isinstance(data.get("created_at"), str)
+            or not isinstance(data.get("diagnosis"), dict)
         ):
             raise ValueError("不支持的诊断记录格式")
         Diagnosis.from_dict(data["diagnosis"])
         return data
+
+    def load_latest_record(self) -> LatestRecord | None:
+        latest_path = self.diagnosis_dir / "latest.json"
+        return load_latest_with_recovery(
+            latest_path,
+            load_path=self._load_path,
+        )

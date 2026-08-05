@@ -16,16 +16,32 @@ from core.models import (
     ToolStatus,
 )
 from .diagnosis import redact_sensitive_text
+from .schema import LatestRecord, SchemaRegistry, load_latest_with_recovery
 
 _RUN_ID_PATTERN = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}"
 )
 
 
+def _migrate_audit_v1(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        **payload,
+        "schema_version": 2,
+        "record_type": "audit",
+    }
+
+
+_SCHEMA_REGISTRY = SchemaRegistry(
+    current_versions={"audit": 2},
+    migrations={("audit", 1): _migrate_audit_v1},
+)
+
+
 class AuditRepository:
     """将 AuditResult 保存到目标项目的隔离目录"""
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
+    RECORD_TYPE = "audit"
     TEXT_LIMIT = 4_000
 
     def __init__(self, project_root: str | Path) -> None:
@@ -160,6 +176,7 @@ class AuditRepository:
         ).astimezone(timezone.utc)
         payload: dict[str, object] = {
             "schema_version": self.SCHEMA_VERSION,
+            "record_type": self.RECORD_TYPE,
             "run_id": result.run_id,
             "created_at": timestamp.isoformat(),
             "status": result.status.value,
@@ -218,18 +235,19 @@ class AuditRepository:
         path: Path,
     ) -> dict[str, object]:
         try:
-            payload = json.loads(
-                path.read_text(encoding="utf-8")
-            )
-        except json.JSONDecodeError as error:
-            raise ValueError(
-                "Audit 记录 JSON 已损坏"
-            ) from error
+            payload = _SCHEMA_REGISTRY.load(
+                path,
+                record_type=cls.RECORD_TYPE,
+            ).payload
+        except ValueError as error:
+            if "JSON" in str(error):
+                raise ValueError("Audit 记录 JSON 已损坏") from error
+            raise ValueError("不支持的 Audit 记录格式") from error
 
         if (
             not isinstance(payload, dict)
-            or payload.get("schema_version")
-            != cls.SCHEMA_VERSION
+            or payload.get("schema_version") != cls.SCHEMA_VERSION
+            or payload.get("record_type") != cls.RECORD_TYPE
             or not isinstance(payload.get("run_id"), str)
             or not isinstance(payload.get("created_at"), str)
             or not isinstance(payload.get("status"), str)
@@ -260,11 +278,15 @@ class AuditRepository:
         return self._load_path(self._record_path(run_id))
 
     def load_latest(self) -> dict[str, object] | None:
-        latest_path = self.audit_dir / "latest.json"
-        if not latest_path.is_file():
-            return None
+        record = self.load_latest_record()
+        return None if record is None else record.payload
 
-        return self._load_path(latest_path)
+    def load_latest_record(self) -> LatestRecord | None:
+        latest_path = self.audit_dir / "latest.json"
+        return load_latest_with_recovery(
+            latest_path,
+            load_path=self._load_path,
+        )
 
     def _sanitize_text(self, value: str) -> tuple[str, bool]:
         without_root = value.replace(

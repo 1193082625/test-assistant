@@ -1,8 +1,11 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from click.testing import CliRunner
 
 from cli.main import cli
+from core.models import Diagnosis
+from core.repositories import DiagnosisRepository
 
 
 def _write_diagnosis(path):
@@ -61,7 +64,19 @@ def test_diagnose_explains_saved_diagnosis(tmp_path):
 def test_status_reads_latest_project_diagnosis(tmp_path):
     diagnosis_dir = tmp_path / ".autotest" / "diagnoses"
     diagnosis_dir.mkdir(parents=True)
-    _write_diagnosis(diagnosis_dir / "latest.json")
+    latest_path = diagnosis_dir / "latest.json"
+    _write_diagnosis(latest_path)
+    diagnosis = json.loads(latest_path.read_text(encoding="utf-8"))
+    latest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "created_at": "2000-01-01T00:00:00+00:00",
+                "diagnosis": diagnosis,
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = CliRunner().invoke(
         cli,
@@ -82,3 +97,30 @@ def test_status_is_unknown_without_diagnosis(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert "暂无诊断记录" in result.output
+
+
+def test_status_reports_read_only_latest_recovery(tmp_path):
+    repository = DiagnosisRepository(tmp_path)
+    first = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    repository.save(
+        diagnosis=Diagnosis(summary="旧诊断"),
+        execution_reports=(),
+        reproduction_command="pytest -q",
+        created_at=first,
+    )
+    newest = repository.save(
+        diagnosis=Diagnosis(summary="最新有效诊断"),
+        execution_reports=(),
+        reproduction_command="pytest -q",
+        created_at=first + timedelta(seconds=1),
+    )
+    latest = repository.diagnosis_dir / "latest.json"
+    latest.write_text("{broken", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["status", "--path", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "已只读恢复自" in result.output
+    assert str(newest) in result.output
+    assert "最新有效诊断" in result.output
+    assert latest.read_text(encoding="utf-8") == "{broken"
