@@ -566,9 +566,3 @@ def suggest_config_templates(frameworks: list, language: str = "") -> dict[str, 
     if language in FRAMEWORK_CONFIG_TEMPLATES:
         templates.update(FRAMEWORK_CONFIG_TEMPLATES[language])
     return templates
-
-if __name__ == "__main__":
-    project_cwd = '/Users/wangyue/Desktop/work/train-departure-diary/train-departure-diary-frontend'
-    result = analyze_project(project_cwd)
-    print(result.project_config)
-    print(result.project_info)
