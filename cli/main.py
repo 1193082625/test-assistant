@@ -13,6 +13,7 @@ from cli.commands.diagnose import diagnose_command
 from cli.commands.verify import verify_command
 from cli.commands.triage import triage_command
 from cli.commands.audit import audit_command
+from cli.commands.doctor import doctor_command
 
 # @click.group() 创建一个命令组，相当于 npm 这样的根命令
 @click.group()
@@ -31,6 +32,7 @@ cli.add_command(diagnose_command)
 cli.add_command(verify_command)
 cli.add_command(triage_command)
 cli.add_command(audit_command)
+cli.add_command(doctor_command)
 cli.add_command(run)
 cli.add_command(status)
 cli.add_command(report)
