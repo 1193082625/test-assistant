@@ -4,12 +4,10 @@
 调用框架分析、快照对比 -- core/analyzers
 """
 import os.path
-from typing import TypedDict, Annotated
+from dataclasses import dataclass
+from typing import TypedDict
 
 import yaml
-from langgraph.graph import add_messages, StateGraph, END
-from langsmith import traceable
-from pydantic import BaseModel
 
 from core.analyzers.snapshot import Snapshot
 from core.executors import select_executor
@@ -18,13 +16,14 @@ from core.analyzers.impact import select_tests_for_changes
 from core.models import TestSelection, TestSelectionMode
 
 
-class ProjectInfo(BaseModel):
+@dataclass(frozen=True)
+class ProjectInfo:
     project_path: str # 项目目标路径
     config: dict # 加载好的 config.yml，所有节点共享
 
 # 定义节点共享state
 class GraphStates(TypedDict):
-    messages: Annotated[list, add_messages]
+    messages: list
     errors: list[str]
     project_info: ProjectInfo
     changed_files: dict # detect的输出 -> run 的输入
@@ -34,7 +33,6 @@ class GraphStates(TypedDict):
     test_selection: TestSelection
 
 # LangGraph 节点只接收一个参数 -- state，多出来的参数没法传进去
-@traceable(name="detect_change")
 def detect_change_node(state: GraphStates) -> dict:
     """
     读取旧 manifest
@@ -67,7 +65,6 @@ def detect_change_node(state: GraphStates) -> dict:
         "messages": "增量检查修改内容"
     }
 
-@traceable(name="analyze_impact")
 def analyze_impact_node(state: GraphStates) -> dict:
     """为当前项目变更生成结构化测试选择结果"""
     project_info = state["project_info"]
@@ -89,7 +86,6 @@ def analyze_impact_node(state: GraphStates) -> dict:
         )
     }
 
-@traceable(name="commit_snapshot")
 def commit_snapshot_node(state: GraphStates) -> dict:
     """将待提交快照保存为新的比较基线"""
     from core.analyzers.snapshot import commit_snapshot_manifest
@@ -104,7 +100,6 @@ def commit_snapshot_node(state: GraphStates) -> dict:
         "messages": "✓ 快照基线已提交"
     }
 
-@traceable(name="run_affected")
 def run_affected_node(state: GraphStates):
     """
     执行变化
@@ -291,12 +286,36 @@ def router(state: GraphStates):
 
 def run_graph(target_path: str):
     """增量执行工作流"""
-    graph_builder = StateGraph(GraphStates)
+    from typing import Annotated
+
+    from langgraph.graph import END, StateGraph, add_messages
+    from langsmith import traceable
+
+    graph_state = TypedDict(
+        "RuntimeGraphStates",
+        {
+            **GraphStates.__annotations__,
+            "messages": Annotated[list, add_messages],
+        },
+    )
+    graph_builder = StateGraph(graph_state)
     # 添加节点
-    graph_builder.add_node("detect_change_node", detect_change_node)
-    graph_builder.add_node("analyze_impact_node", analyze_impact_node)
-    graph_builder.add_node("run_affected_node", run_affected_node)
-    graph_builder.add_node("commit_snapshot_node", commit_snapshot_node)
+    graph_builder.add_node(
+        "detect_change_node",
+        traceable(name="detect_change")(detect_change_node),
+    )
+    graph_builder.add_node(
+        "analyze_impact_node",
+        traceable(name="analyze_impact")(analyze_impact_node),
+    )
+    graph_builder.add_node(
+        "run_affected_node",
+        traceable(name="run_affected")(run_affected_node),
+    )
+    graph_builder.add_node(
+        "commit_snapshot_node",
+        traceable(name="commit_snapshot")(commit_snapshot_node),
+    )
 
     # 设置入口节点
     graph_builder.set_entry_point("detect_change_node")

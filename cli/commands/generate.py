@@ -3,8 +3,11 @@ from pathlib import Path
 
 import click
 
-from core.llm.client import LLMClient
 from core.models import TestSpecStatus
+from core.optional_dependencies import (
+    OptionalDependencyError,
+    require_optional_modules,
+)
 from core.repositories.test_spec import TestSpecRepository
 from core.workflows.candidate import (
     CandidateCommitStatus,
@@ -12,6 +15,27 @@ from core.workflows.candidate import (
     commit_reviewed_candidate,
     prepare_candidate_for_review,
 )
+
+
+# 保留为可注入接缝，避免测试需要安装或调用真实 LLM。
+LLMClient = None
+
+
+def _llm_client_type():
+    if LLMClient is not None:
+        return LLMClient
+    require_optional_modules(
+        extra="llm",
+        capability="generate",
+        modules=(
+            "dotenv",
+            "langchain_core",
+            "langchain_openai",
+        ),
+    )
+    from core.llm.client import LLMClient as client_type
+
+    return client_type
 
 
 @click.command("generate")
@@ -75,7 +99,12 @@ def generate_command(
             "只有 approved TestSpec 可以生成候选测试"
         )
 
-    llm = LLMClient(model=model)
+    try:
+        llm_client_type = _llm_client_type()
+    except OptionalDependencyError as error:
+        raise click.UsageError(str(error)) from error
+
+    llm = llm_client_type(model=model)
 
     preparation = prepare_candidate_for_review(
         project_root=project_path,

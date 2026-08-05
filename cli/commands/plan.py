@@ -10,13 +10,37 @@ from core.analyzers.source import (
     analyze_python_symbols,
     classify_symbol_testability,
 )
-from core.llm.client import LLMClient
 from core.models import PlannerStatus, TestabilityStatus
+from core.optional_dependencies import (
+    OptionalDependencyError,
+    require_optional_modules,
+)
 from core.planners.test_spec import plan_test_spec
 from core.repositories.test_spec import (
     TestSpecRepository
 )
 from core.repositories import AuditRepository
+
+
+# 保留为可注入接缝，测试和嵌入方可提供自己的 client。
+LLMClient = None
+
+
+def _llm_client_type():
+    if LLMClient is not None:
+        return LLMClient
+    require_optional_modules(
+        extra="llm",
+        capability="plan propose",
+        modules=(
+            "dotenv",
+            "langchain_core",
+            "langchain_openai",
+        ),
+    )
+    from core.llm.client import LLMClient as client_type
+
+    return client_type
 
 
 def _repository_for(
@@ -138,6 +162,10 @@ def propose_spec(
         )
 
     try:
+        try:
+            llm_client_type = _llm_client_type()
+        except OptionalDependencyError as error:
+            raise click.UsageError(str(error)) from error
         evidence = [
             item
             for item in extract_python_contract_evidence(
@@ -150,7 +178,7 @@ def propose_spec(
             )
         ]
         result = plan_test_spec(
-            llm=LLMClient(model=model),
+            llm=llm_client_type(model=model),
             symbol=symbol,
             testability=testability,
             evidence=evidence,

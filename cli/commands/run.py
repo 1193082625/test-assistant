@@ -21,8 +21,32 @@ import click
 import yaml
 
 from core.analyzers.framework import suggest_test_framework, suggest_config_templates
-from core.graphs.run_graph import run_graph
+from core.optional_dependencies import (
+    OptionalDependencyError,
+    require_optional_modules,
+)
 from core.utils import find_project_root
+
+
+# 保留为可注入接缝；真实 graph 仅在执行 run 时导入。
+run_graph = None
+
+
+def _load_run_graph():
+    if run_graph is not None:
+        return run_graph
+    require_optional_modules(
+        extra="llm",
+        capability="run",
+        modules=(
+            "langchain_core",
+            "langgraph",
+            "langsmith",
+        ),
+    )
+    from core.graphs.run_graph import run_graph as graph_runner
+
+    return graph_runner
 
 
 def _ensure_smoke_test(project_path: str, project_type: str, test_frameworks: list[str]):
@@ -62,6 +86,11 @@ def _ensure_smoke_test(project_path: str, project_type: str, test_frameworks: li
 @click.option("--path", default=".", help="目标项目路径")
 def run(path):
     """增量运行测试"""
+
+    try:
+        graph_runner = _load_run_graph()
+    except OptionalDependencyError as error:
+        raise click.UsageError(str(error)) from error
 
     # 获取目标路径
     if path:
@@ -173,7 +202,7 @@ def run(path):
 
     _ensure_smoke_test(project_path, project_type, test_frameworks)
 
-    result = run_graph(project_path)
+    result = graph_runner(project_path)
 
     # 变更检测输出
     changed_files = result["changed_files"]
@@ -208,4 +237,3 @@ def run(path):
     # 汇总
     msg = result["messages"][-1]
     click.echo(f"→ {msg.content}")
-

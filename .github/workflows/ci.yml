@@ -68,6 +68,10 @@ jobs:
         os:
           - ubuntu-latest
           - macos-latest
+        installation:
+          - base
+          - llm
+          - quality
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/setup-python@v5
@@ -81,16 +85,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          smoke_root="${RUNNER_TEMP}/test-assistant-wheel-smoke"
+          smoke_root="${RUNNER_TEMP}/test-assistant-wheel-smoke-${{ matrix.installation }}"
           smoke_venv="${smoke_root}/venv"
           smoke_project="${smoke_root}/fixture with spaces 中文"
+          wheel_path="$(find dist -name '*.whl' -print -quit)"
+          install_target="$wheel_path"
+          if [ "${{ matrix.installation }}" != "base" ]; then
+            install_target="${wheel_path}[${{ matrix.installation }}]"
+          fi
           python -m venv "$smoke_venv"
-          "$smoke_venv/bin/pip" install dist/*.whl "pytest==9.1.1"
+          if [ "${{ matrix.installation }}" = "base" ]; then
+            "$smoke_venv/bin/pip" install "click>=8.4.2,<9.0.0" "pyyaml>=6.0.3,<7.0.0" "pytest==9.1.1"
+            "$smoke_venv/bin/pip" install --no-deps "$wheel_path"
+          else
+            "$smoke_venv/bin/pip" install "$install_target" "pytest==9.1.1"
+          fi
           mkdir -p "$smoke_project"
           echo 'value = 1' > "$smoke_project/app.py"
           "$smoke_venv/bin/test-assistant" --version | grep '0.6.2'
           "$smoke_venv/bin/test-assistant" doctor --help
           "$smoke_venv/bin/test-assistant" triage --help
+          "$smoke_venv/bin/test-assistant" plan list --help
+          "$smoke_venv/bin/test-assistant" generate --help
+          "$smoke_venv/bin/test-assistant" run --help
           import_path="$(cd "$smoke_root" && "$smoke_venv/bin/python" -c 'import cli; print(cli.__file__)')"
           case "$import_path" in
             "$smoke_venv"/*) ;;
@@ -107,6 +124,19 @@ jobs:
           diff -u "$smoke_root/before-paths.txt" "$smoke_root/after-paths.txt"
           diff -u "$smoke_root/before-files.txt" "$smoke_root/after-files.txt"
           test ! -e "$smoke_project/.autotest"
+
+          if [ "${{ matrix.installation }}" = "base" ]; then
+            set +e
+            "$smoke_venv/bin/test-assistant" run --path "$smoke_project" > "$smoke_root/missing-extra.txt" 2>&1
+            missing_status=$?
+            set -e
+            test "$missing_status" -eq 2
+            grep "llm_extra_required" "$smoke_root/missing-extra.txt"
+          elif [ "${{ matrix.installation }}" = "llm" ]; then
+            "$smoke_venv/bin/python" -c 'from core.llm.client import LLMClient; from core.graphs.run_graph import run_graph'
+          else
+            "$smoke_venv/bin/python" -c 'import json,sys; data=json.load(open(sys.argv[1])); checks={item["name"]: item["state"] for item in data["checks"]}; assert all(checks[name] == "available" for name in ("pytest-cov", "coverage", "ruff", "mypy"))' "$smoke_root/doctor.json"
+          fi
 
   python-314-probe:
     needs: build

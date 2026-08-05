@@ -1,5 +1,5 @@
 from click.testing import CliRunner
-from langchain_core.messages import AIMessage
+from types import SimpleNamespace
 from cli.commands.run import run as run_command
 
 def test_run_command_consumes_graph_result(tmp_path, monkeypatch):
@@ -31,7 +31,7 @@ def test_run_command_consumes_graph_result(tmp_path, monkeypatch):
             },
             "execution_reports_by_file": {},
             "messages": [
-                AIMessage(content="执行完成")
+                SimpleNamespace(content="执行完成")
             ],
             "errors": []
         }
