@@ -15,6 +15,7 @@ from .triage import (
 )
 from .audit import run_audit
 from core.models import TriageResult
+from .doctor import run_doctor
 
 __all__ = [
     "VerificationResult",
@@ -30,4 +31,5 @@ __all__ = [
     "run_audit",
     "TriageResult",
     "triage_pytest_suite",
+    "run_doctor",
 ]
