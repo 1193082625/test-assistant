@@ -1,7 +1,7 @@
 # test-assistant v0.6～v1.0 统一版本路线图
 
 > 状态：当前权威版本规划  
-> 基线：`v0.6.0` 已完成；`v0.6.1` Doctor 源码与自动化验收已完成，发布产物验证待执行
+> 基线：`v0.6.1` 已完成 Doctor、干净 wheel 和 `fitstyle-backend` 只读验收；`v0.6.2` 正在建立跨平台兼容证据
 > 制定日期：2026-08-04
 
 ## 1. 规划原则
@@ -16,9 +16,9 @@
 
 ## 2. 当前基线
 
-`v0.6.0` 已交付 coverage、Ruff、mypy 只读审计、显式质量门禁、中断清理和安装产物 smoke。在此基础上，`v0.6.1` 已实现只读 `doctor`、schema v1 环境 JSON、稳定退出码，以及真实 CLI 子进程只读验收；完整发布构建和干净 wheel 安装仍属于发布前验证。
+`v0.6.1` 已实现只读 `doctor`、schema v1 环境 JSON 和稳定退出码，并完成 Python 3.13 干净 wheel 安装以及 `fitstyle-backend` Doctor/coverage Audit 只读验收。
 
-仍需工程化的事项包括：v0.6.1 发布产物验收、跨平台兼容矩阵、特殊路径系统矩阵、性能/内存基线、持久化数据生命周期和正式安全发布门。
+`v0.6.2` 增加同一 wheel 的 Ubuntu/macOS 消费矩阵、特殊路径系统测试、Python 3.14 非阻塞探测和自动兼容表。后续仍需性能/内存基线、持久化数据生命周期和正式安全发布门。
 
 ## 3. 版本边界
 
@@ -26,6 +26,7 @@
 | --- | --- | --- | --- |
 | `v0.6.0` | 只读质量审计版 | coverage、Ruff、mypy、`audit`、`--version`、中断清理、wheel 自动 smoke | 自动修复、安全扫描、性能优化 |
 | `v0.6.1` | 环境诊断版 | 只读 `doctor`、schema v1 JSON、核心/降级状态和稳定退出码 | 跨平台矩阵、Python 3.14、自动安装或修复环境 |
+| `v0.6.2` | 兼容性证据版 | Ubuntu/macOS 同一 wheel 矩阵、特殊路径、生成式支持表、3.14 探测 | Windows 支持、Python 3.14 认证、运行时修复环境 |
 | `v0.6.x` | 兼容性与可诊断性列车 | `doctor`、平台/解释器/pytest 矩阵、特殊路径与降级验证 | 改变 triage/audit 核心语义、Web、负载测试 |
 | `v0.7.0` | 规模化与数据生命周期版 | 性能/内存基线、大 fixture、schema 迁移、记录清理、可选依赖拆分 | 多用户服务、自动调参 |
 | `v1.0.0` | 正式安全发布版 | 安全门、发布矩阵、供应链证据、PyPI、治理文件、真实项目回归矩阵 | Web、watch、Vitest 完整闭环 |
@@ -49,6 +50,7 @@ Web 或常驻服务出现后再规划负载、并发压力、长稳、运行时�
 
 - `v0.6.0`：`2026-08-03-coverage-and-code-quality-v0.6.0.md`
 - `v0.6.1`：`2026-08-04-environment-doctor-v0.6.1.md`
+- `v0.6.2`：`2026-08-05-compatibility-matrix-v0.6.2.md`
 - `v0.6.x`：`2026-08-04-compatibility-and-doctor-v0.6.x.md`
 - `v0.7.0`：`2026-08-04-scale-and-data-lifecycle-v0.7.0.md`
 - `v1.0.0`：`2026-08-04-secure-release-v1.0.0.md`

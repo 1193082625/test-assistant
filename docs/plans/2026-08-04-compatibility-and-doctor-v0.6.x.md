@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.13+、Click、pytest、GitHub Actions、JSON。
 
-**当前进度（2026-08-05）：** `v0.6.1` 的环境模型、安全探测器、只读工作流、CLI、JSON/退出码和真实子进程验收已完成；发布构建验证尚待执行。跨平台 wheel 与特殊路径矩阵仍属于 `v0.6.2`，未提前声明支持。
+**当前进度（2026-08-05）：** `v0.6.1` 已完成环境模型、安全探测器、只读工作流、CLI、干净 wheel 和 `fitstyle-backend` 验收。`v0.6.2` 已实现 Ubuntu/macOS 同一 wheel CI、特殊路径矩阵、Python 3.14 非阻塞探测和生成式兼容表，平台认证以 CI 绿色结果为准。
 
 ---
 
@@ -36,7 +36,7 @@
 3. 退出码：健康或部分可选工具缺失为 `0`；核心 Python/pytest 不兼容为 `1`；参数/基础设施错误为 `2`。
 4. 运行相关测试并提交 `feat: add read-only doctor command`。
 
-### Task 3: 建立兼容 CI 矩阵（v0.6.2）
+### Task 3: 建立兼容 CI 矩阵（v0.6.2 已实现，等待 CI 证据）
 
 **Files:** Modify `.github/workflows/ci.yml`; create `tests/test_installed_cli_smoke.py`（如 shell smoke 无法提供足够断言）。
 
@@ -45,7 +45,7 @@
 3. 新 Python/pytest 版本先作为允许失败的探测 job，通过后才能进入支持矩阵。
 4. 提交 `ci: verify supported runtime matrix`。
 
-### Task 4: 路径与环境边界（v0.6.2）
+### Task 4: 路径与环境边界（v0.6.2 已完成）
 
 **Files:** Test `tests/test_path_compatibility.py`, `tests/test_cli_end_to_end.py`；按失败点修改路径组件。
 

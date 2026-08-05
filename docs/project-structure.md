@@ -1,6 +1,6 @@
 # test-assistant 项目结构
 
-> 当前版本：`v0.6.1`
+> 当前版本：`v0.6.2`
 >
 > 更新日期：2026-08-05
 >
@@ -17,9 +17,12 @@ test-assistant/
 ├── tests/                  单元、契约、CLI 集成和端到端测试
 ├── docs/
 │   ├── project-structure.md
+│   ├── compatibility.json 机器可读兼容性清单
+│   ├── compatibility.md   从清单生成的支持表
 │   ├── user-guide.md
 │   └── plans/              历史设计、路线图和实施计划
 ├── pyproject.toml          包、依赖、命令入口和 pytest 配置
+├── scripts/                兼容表等确定性维护脚本
 ├── poetry.lock             锁定的依赖版本
 └── README.md               项目概览和快速开始
 ```
@@ -210,6 +213,9 @@ tests/test_environment_model.py       Doctor schema v1 领域契约
 tests/test_environment_probe.py       受控命令、超时和输出边界
 tests/test_doctor_workflow.py          环境聚合、降级与汇总状态
 tests/test_cli_doctor.py               文本/JSON 输出、参数和退出码
+tests/test_path_compatibility.py       特殊路径、符号链接和只读边界
+tests/test_compatibility_manifest.py   兼容清单校验和生成文档防漂移
+tests/test_ci_compatibility.py         单次构建与平台 wheel 矩阵契约
 tests/test_cli_plan_propose.py         TestSpec 提议入口
 tests/test_cli_generate.py             审批、diff 与提交
 tests/test_cli_verify.py               真实 pytest 三次验证

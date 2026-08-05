@@ -19,22 +19,101 @@ jobs:
         run: pipx install poetry
       - name: Install dependencies
         run: poetry install --no-interaction
+      - name: Check generated compatibility table
+        run: poetry run python scripts/generate_compatibility_table.py --check
       - name: Run tests
         run: poetry run pytest -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Poetry
+        run: pipx install poetry
       - name: Build distributions
         run: poetry build
+      - name: Upload immutable distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error
+
+  wheel-smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
       - name: Smoke test installed wheel
         shell: bash
         run: |
-          python -m venv /tmp/test-assistant-wheel
-          /tmp/test-assistant-wheel/bin/pip install dist/*.whl
-          /tmp/test-assistant-wheel/bin/test-assistant --version
-          /tmp/test-assistant-wheel/bin/test-assistant doctor --help
-          /tmp/test-assistant-wheel/bin/test-assistant audit --help
-          mkdir -p /tmp/test-assistant-fixture
-          echo 'value = 1' > /tmp/test-assistant-fixture/app.py
+          set -euo pipefail
+          smoke_root="${RUNNER_TEMP}/test-assistant-wheel-smoke"
+          smoke_venv="${smoke_root}/venv"
+          smoke_project="${smoke_root}/fixture with spaces 中文"
+          python -m venv "$smoke_venv"
+          "$smoke_venv/bin/pip" install dist/*.whl "pytest==9.1.1"
+          mkdir -p "$smoke_project"
+          echo 'value = 1' > "$smoke_project/app.py"
+          "$smoke_venv/bin/test-assistant" --version | grep '0.6.2'
+          "$smoke_venv/bin/test-assistant" doctor --help
+          "$smoke_venv/bin/test-assistant" triage --help
+          import_path="$(cd "$smoke_root" && "$smoke_venv/bin/python" -c 'import cli; print(cli.__file__)')"
+          case "$import_path" in
+            "$smoke_venv"/*) ;;
+            *) echo "wheel import escaped venv: $import_path" >&2; exit 1 ;;
+          esac
+          find "$smoke_project" -print | sort > "$smoke_root/before-paths.txt"
+          find "$smoke_project" -type f -exec shasum -a 256 {} \; | sort > "$smoke_root/before-files.txt"
+          "$smoke_venv/bin/test-assistant" doctor --path "$smoke_project"
+          "$smoke_venv/bin/test-assistant" doctor --path "$smoke_project" --json > "$smoke_root/doctor.json"
+          "$smoke_venv/bin/python" -m json.tool "$smoke_root/doctor.json" > /dev/null
+          "$smoke_venv/bin/python" -c 'import json,sys; data=json.load(open(sys.argv[1])); assert data["schema_version"] == 1 and data["status"] == "healthy"' "$smoke_root/doctor.json"
+          find "$smoke_project" -print | sort > "$smoke_root/after-paths.txt"
+          find "$smoke_project" -type f -exec shasum -a 256 {} \; | sort > "$smoke_root/after-files.txt"
+          diff -u "$smoke_root/before-paths.txt" "$smoke_root/after-paths.txt"
+          diff -u "$smoke_root/before-files.txt" "$smoke_root/after-files.txt"
+          test ! -e "$smoke_project/.autotest"
+
+  python-314-probe:
+    needs: build
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: Probe unsupported Python with Doctor
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe_root="${RUNNER_TEMP}/test-assistant-python-314"
+          python -m venv "$probe_root/venv"
+          "$probe_root/venv/bin/pip" install --ignore-requires-python dist/*.whl "pytest==9.1.1"
+          mkdir -p "$probe_root/fixture"
           set +e
-          /tmp/test-assistant-wheel/bin/test-assistant audit --path /tmp/test-assistant-fixture --timeout 10
-          audit_status=$?
+          "$probe_root/venv/bin/test-assistant" doctor --path "$probe_root/fixture" --json > "$probe_root/doctor.json"
+          doctor_status=$?
           set -e
-          test "$audit_status" -eq 2
+          test "$doctor_status" -eq 1
+          "$probe_root/venv/bin/python" -c 'import json,sys; data=json.load(open(sys.argv[1])); python_check=next(item for item in data["checks"] if item["name"] == "python"); assert data["status"] == "incompatible" and python_check["reason"] == "unsupported_python_version"' "$probe_root/doctor.json"

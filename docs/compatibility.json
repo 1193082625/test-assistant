@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "release": "0.6.2",
+  "entries": [
+    {
+      "category": "operating_system",
+      "id": "macos",
+      "label": "macOS (GitHub macos-latest)",
+      "state": "supported",
+      "details": "Python 3.13 wheel consumption and Doctor smoke in CI"
+    },
+    {
+      "category": "operating_system",
+      "id": "ubuntu",
+      "label": "Ubuntu (GitHub ubuntu-latest)",
+      "state": "supported",
+      "details": "Python 3.13 wheel consumption and Doctor smoke in CI"
+    },
+    {
+      "category": "operating_system",
+      "id": "windows",
+      "label": "Windows",
+      "state": "unsupported",
+      "details": "No Windows runner or process interruption certification"
+    },
+    {
+      "category": "python",
+      "id": "python-3.13",
+      "label": "Python 3.13",
+      "state": "supported",
+      "details": "Package metadata, full test suite and wheel smoke"
+    },
+    {
+      "category": "python",
+      "id": "python-3.14",
+      "label": "Python 3.14",
+      "state": "experimental",
+      "details": "Non-blocking Doctor probe; package installation is rejected"
+    },
+    {
+      "category": "pytest",
+      "id": "pytest-9.0",
+      "label": "pytest 9.0",
+      "state": "supported",
+      "details": "Validated in fitstyle-backend with pytest 9.0.2"
+    },
+    {
+      "category": "pytest",
+      "id": "pytest-9.1",
+      "label": "pytest 9.1",
+      "state": "supported",
+      "details": "Validated by clean wheel smoke with pytest 9.1.1"
+    },
+    {
+      "category": "path",
+      "id": "spaces",
+      "label": "Paths containing spaces",
+      "state": "supported",
+      "details": "Real CLI subprocess and no-write assertions"
+    },
+    {
+      "category": "path",
+      "id": "unicode",
+      "label": "Chinese/Unicode paths",
+      "state": "supported",
+      "details": "Real CLI subprocess and JSON round trip"
+    },
+    {
+      "category": "path",
+      "id": "long-path",
+      "label": "Long nested paths",
+      "state": "supported",
+      "details": "Deterministic nested-path CLI test within platform limits"
+    },
+    {
+      "category": "path",
+      "id": "directory-symlink",
+      "label": "Project directory symlink",
+      "state": "supported",
+      "details": "Resolved to the canonical directory without writes"
+    },
+    {
+      "category": "path",
+      "id": "broken-symlink",
+      "label": "Broken project symlink",
+      "state": "supported",
+      "details": "Rejected before workflow execution with exit code 2"
+    },
+    {
+      "category": "path",
+      "id": "non-git",
+      "label": "Non-Git project",
+      "state": "supported",
+      "details": "Git capability degrades without failing core Doctor status"
+    },
+    {
+      "category": "path",
+      "id": "read-only",
+      "label": "Read-only project directory",
+      "state": "supported",
+      "details": "Text and JSON Doctor complete without project writes"
+    }
+  ]
+}

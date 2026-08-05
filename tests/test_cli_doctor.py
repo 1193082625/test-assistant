@@ -19,7 +19,7 @@ def _healthy_result() -> DoctorResult:
     return DoctorResult(
         schema_version=1,
         status=DoctorStatus.HEALTHY,
-        test_assistant_version="0.6.1",
+        test_assistant_version="0.6.2",
         project_path="/project",
         python_implementation="cpython",
         platform="macOS-15-arm64",
@@ -102,7 +102,7 @@ def test_doctor_cli_renders_environment_summary(
 
     assert "Doctor 状态: healthy" in result.output
     assert (
-        "test-assistant: 0.6.1"
+        "test-assistant: 0.6.2"
         in result.output
     )
     assert "项目路径: /project" in result.output

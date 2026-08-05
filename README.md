@@ -2,7 +2,7 @@
 
 `test-assistant` 是一个面向 Python/pytest 项目的本地智能测试 CLI。
 
-当前 `v0.6.1` 提供 TestSpec 审批与候选门禁、pytest 失败分诊、只读质量审计，以及运行前环境诊断。
+当前 `v0.6.2` 提供 TestSpec 审批与候选门禁、pytest 失败分诊、只读质量审计、环境诊断，以及 Ubuntu/macOS wheel 和特殊路径兼容性证据。
 
 ## 当前能力
 
@@ -81,7 +81,7 @@ test-assistant doctor --path . --timeout 10
 
 Doctor 只执行固定的版本探测命令，不联网、不安装依赖、不运行测试、lint 或类型检查，也不写入目标项目。文本输出供人工排障；`--json` 输出 `schema_version: 1` 的纯 JSON。
 
-退出码为：`0` 表示核心环境健康（允许 Git 或可选 adapter 缺失），`1` 表示核心 Python/pytest 环境不兼容，`2` 表示参数或基础设施错误。v0.6.1 认证 Python 3.13；其他 Python 版本会明确报告为不兼容。
+退出码为：`0` 表示核心环境健康（允许 Git 或可选 adapter 缺失），`1` 表示核心 Python/pytest 环境不兼容，`2` 表示参数或基础设施错误。v0.6.2 认证 Ubuntu/macOS 上的 Python 3.13；Windows 不在支持范围，Python 3.14 仅做非阻塞探测。
 
 ## 只读质量审计
 
@@ -266,7 +266,7 @@ poetry run test-assistant triage --path /path/to/demo-project \
 - Web Dashboard 和 watch 尚未实现；
 - Vitest 执行器不属于当前 TestSpec 生成闭环；
 - 没有已批准强契约时，稳定失败通常返回 `INCONCLUSIVE`；
-- v0.6.1 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
+- v0.6.2 不自动修改失败测试或产品实现，也不使用 LLM 猜测归因；
 - 当前使用版本化 JSON，尚未引入 SQLite 或远程服务；
 - 真实 LLM 验证是显式 smoke test，不属于默认自动化测试。
 
@@ -274,12 +274,14 @@ poetry run test-assistant triage --path /path/to/demo-project \
 
 - [完整用户指南](docs/user-guide.md)：参数解释、完整操作、退出码和排错；
 - [项目结构](docs/project-structure.md)：模块职责、依赖方向、数据流和系统不变量；
+- [兼容性支持表](docs/compatibility.md)：由机器可读清单生成的系统、Python、pytest 和路径支持状态；
 - [可信 CLI 路线图](docs/plans/2026-07-27-python-cli-trusted-loop-roadmap.md)：范围、里程碑和后续方向；
 - [v0.6～v1.0 统一版本路线图](docs/plans/2026-08-04-version-roadmap-v0.6-v1.0.md)：当前权威版本边界、统一发布门和计划索引；
 - [端到端 CLI 实施计划](docs/plans/2026-08-01-end-to-end-cli-workflow.md)：本轮架构决策和测试计划。
 - [v0.5.2 契约迁移归因规划](docs/plans/2026-08-03-contract-migration-triage-v0.5.2.md)：配置默认值、常量和字段类型迁移的高置信度归因。
 - [v0.6.0 覆盖率与代码质量规划](docs/plans/2026-08-03-coverage-and-code-quality-v0.6.0.md)：源码符号覆盖、Ruff、mypy 和只读 audit 工作流。
 - [v0.6.x 兼容性与 doctor 规划](docs/plans/2026-08-04-compatibility-and-doctor-v0.6.x.md)：环境诊断、平台矩阵与特殊路径验证。
+- [v0.6.2 详细实施计划](docs/plans/2026-08-05-compatibility-matrix-v0.6.2.md)：同一 wheel 跨平台消费、路径矩阵和兼容表生成。
 - [v0.7.0 规模化与数据生命周期规划](docs/plans/2026-08-04-scale-and-data-lifecycle-v0.7.0.md)：性能/内存基线、schema 迁移、记录清理和可选依赖。
 - [v1.0.0 安全发布规划](docs/plans/2026-08-04-secure-release-v1.0.0.md)：安全门、供应链证明、PyPI 和真实项目回归矩阵。
 
