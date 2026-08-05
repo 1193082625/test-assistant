@@ -7,10 +7,23 @@ from core.executors.coverage_executor import (
     CoverageExecutionResult,
     CoverageExecutor,
 )
-from core.executors.ruff_executor import RuffExecutionResult, RuffExecutor
-from core.executors.mypy_executor import MypyExecutionResult, MypyExecutor
-from core.executors.pytest_executor import PytestExecutor
-from core.executors.vitest_executor import VitestExecutor
+from core.executors.environment_probe import (
+    probe_command,
+)
+from core.executors.mypy_executor import (
+    MypyExecutionResult,
+    MypyExecutor,
+)
+from core.executors.pytest_executor import (
+    PytestExecutor,
+)
+from core.executors.ruff_executor import (
+    RuffExecutionResult,
+    RuffExecutor,
+)
+from core.executors.vitest_executor import (
+    VitestExecutor,
+)
 
 EXECUTOR_REGISTRY: dict[str, type[BaseExecutor]] = {
     "pytest": PytestExecutor,
@@ -23,12 +36,14 @@ EXECUTOR_LANGUAGES: dict[str, frozenset[str]] = {
     "vitest": frozenset({"javascript", "typescript"}),
 }
 
+
 @dataclass
 class ExecutorSelection:
     """执行器选择结果"""
     supported: bool
     executor: BaseExecutor | None
     reason: str = ""
+
 
 def select_executor(
     framework: str,
