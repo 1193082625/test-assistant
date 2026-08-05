@@ -66,6 +66,13 @@ from .audit import (
     ToolStatus,
 )
 
+from .environment import (
+    DoctorResult,
+    DoctorStatus,
+    EnvironmentCheck,
+    EnvironmentCheckState,
+)
+
 __all__ = [
     "ContractMigrationEvidence",
     "ContractMigrationType",
@@ -117,4 +124,8 @@ __all__ = [
     "SymbolCoverage",
     "ToolState",
     "ToolStatus",
+    "DoctorResult",
+    "DoctorStatus",
+    "EnvironmentCheck",
+    "EnvironmentCheckState",
 ]
