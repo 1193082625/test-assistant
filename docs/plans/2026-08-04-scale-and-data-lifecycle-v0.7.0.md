@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.13+、pytest、resource/tracemalloc、JSON schema migration、Poetry extras。
 
+> 本文件保留版本范围摘要。可直接执行的逐任务计划见 `2026-08-05-scale-data-lifecycle-v0.7.0.md`。
+
 ---
 
 ### Task 1: 建立可重复的大型 fixture 生成器
@@ -59,4 +61,3 @@
 - 数据可跨已支持 schema 读取，损坏 latest 可恢复且原历史不丢失；
 - 清理始终先预览并受路径边界保护；
 - 只使用 triage 的用户无需安装 LLM 或质量工具依赖。
-

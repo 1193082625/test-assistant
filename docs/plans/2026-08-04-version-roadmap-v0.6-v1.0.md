@@ -54,7 +54,8 @@ Web 或常驻服务出现后再规划负载、并发压力、长稳、运行时�
 - `v0.6.1`：`2026-08-04-environment-doctor-v0.6.1.md`
 - `v0.6.2`：`2026-08-05-compatibility-matrix-v0.6.2.md`
 - `v0.6.x`：`2026-08-04-compatibility-and-doctor-v0.6.x.md`
-- `v0.7.0`：`2026-08-04-scale-and-data-lifecycle-v0.7.0.md`
+- `v0.7.0` 范围摘要：`2026-08-04-scale-and-data-lifecycle-v0.7.0.md`
+- `v0.7.0` 详细执行：`2026-08-05-scale-data-lifecycle-v0.7.0.md`
 - `v1.0.0`：`2026-08-04-secure-release-v1.0.0.md`
 
 较早计划保留为历史决策记录；当其版本定义与本文冲突时，以本文及上述版本实施计划为准。
