@@ -38,3 +38,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "performance: deterministic CI-scale performance and memory checks",
+    "large_performance: fixed-machine large profile excluded by default",
+]
