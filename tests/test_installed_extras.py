@@ -15,6 +15,11 @@ def _project_metadata() -> dict:
         return tomllib.load(file)["project"]
 
 
+def _configuration() -> dict:
+    with (ROOT / "pyproject.toml").open("rb") as file:
+        return tomllib.load(file)
+
+
 def _names(requirements: list[str]) -> set[str]:
     return {
         requirement.split(" ", 1)[0].lower()
@@ -42,6 +47,15 @@ def test_base_and_optional_dependency_sets_are_explicit():
     assert _names(extras["all"]) == (
         _names(extras["llm"]) | _names(extras["quality"])
     )
+
+
+def test_dev_dependencies_provide_pydantic_contract_fixtures():
+    configuration = _configuration()
+
+    assert _names(configuration["dependency-groups"]["dev"]) == {
+        "pytest",
+        "pydantic",
+    }
 
 
 def test_root_cli_imports_when_optional_packages_are_blocked():
