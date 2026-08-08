@@ -49,12 +49,13 @@ def test_base_and_optional_dependency_sets_are_explicit():
     )
 
 
-def test_dev_dependencies_provide_pydantic_contract_fixtures():
+def test_dev_dependencies_provide_runtime_fixture_dependencies():
     configuration = _configuration()
 
     assert _names(configuration["dependency-groups"]["dev"]) == {
         "pytest",
         "pydantic",
+        "langgraph",
     }
 
 
